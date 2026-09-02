@@ -1,8 +1,7 @@
-﻿-- Equilibrium v2.2 | single file, no external modules required
--- Fixes: File explorer TP Bank, About tab layout, Puck "=" symbol, RBX asset backgrounds, clean load notification
--- Window: _ ⬜ × | Puck = | Theme-compatible background | Locked by default | X hide / hold unload
+﻿-- Equilibrium v1.1 COMPILED | single file, no external modules required
+-- Fixes: combined core + settings + context + verity + knowledge, mount debug, removed stray end, fixed new()/continue
+-- Window: true Windows _ ? | | Slate 070707 | V puck | Locked by default | X hide / hold unload
 -- Clock Independence: InteractionState.sequence (event order) | AssistantState.Revision (conversation version) | KnowledgeRegistry.Revision (knowledge version) | Reaction/Behavior cooldowns (temporal) | AppearanceGeneration (visual rebuild) | never cross-use
--- Load Notification: Clean "v2.2 • Universal Hub" (no verbose hex codes)
 
 -- single-instance cleanup (ownership attribute, legacy name fallback)
 pcall(function()
@@ -26,7 +25,7 @@ local Players=game:GetService("Players"); local RunService=game:GetService("RunS
 local TweenService=game:GetService("TweenService"); local Lighting=game:GetService("Lighting"); local HttpService=game:GetService("HttpService")
 local TeleportService=game:GetService("TeleportService"); local GuiService=game:GetService("GuiService"); local Workspace=game:GetService("Workspace")
 local LP=Players.LocalPlayer; local Camera=Workspace.CurrentCamera or Workspace:FindFirstChildOfClass("Camera")
-print("[Equilibrium] boot | "..BRAND.." v2.2")
+print("[Equilibrium] boot | "..BRAND.." v2.7.2")
 
 -- ===== Settings (file+memory, inlined) =====
 local Settings={}; do
@@ -114,17 +113,11 @@ THEMES={
     Theme_09={id="Theme_09", name="Forest", colors={bg=Color3.fromHex("07100a"), panel=Color3.fromHex("0f1f16"), panel2=Color3.fromHex("142a1e"), border=Color3.fromHex("1e3a2a"), borderHover=Color3.fromHex("2a4a36"), text=Color3.fromHex("e0f0e6"), subtext=Color3.fromHex("8fb8a0"), dim=Color3.fromHex("6a9a80"), accent=Color3.fromHex("2ecc71"), accentDim=Color3.fromHex("239a55"), on=Color3.fromHex("2ecc71"), off=Color3.fromHex("4b5563"), warn=Color3.fromHex("e74c3c"), danger=Color3.fromHex("c0392b"), success=Color3.fromHex("2ecc71")}, effects={corner=10, border=1}},
     Theme_10={id="Theme_10", name="Amethyst", colors={bg=Color3.fromHex("0d0a14"), panel=Color3.fromHex("1a1230"), panel2=Color3.fromHex("221840"), border=Color3.fromHex("2e1f4a"), borderHover=Color3.fromHex("3e2a63"), text=Color3.fromHex("e8e0ff"), subtext=Color3.fromHex("a898c8"), dim=Color3.fromHex("7e6ea0"), accent=Color3.fromHex("9b59ff"), accentDim=Color3.fromHex("7a3fcc"), on=Color3.fromHex("9b59ff"), off=Color3.fromHex("4b5563"), warn=Color3.fromHex("e84393"), danger=Color3.fromHex("c50f1f"), success=Color3.fromHex("5fdc82")}, effects={corner=10, border=1}},
     Theme_11={id="Theme_11", name="Abyss", colors={bg=Color3.fromHex("05080c"), panel=Color3.fromHex("0d1420"), panel2=Color3.fromHex("111e30"), border=Color3.fromHex("1a2a40"), borderHover=Color3.fromHex("243a55"), text=Color3.fromHex("d8e8ff"), subtext=Color3.fromHex("8aa0b8"), dim=Color3.fromHex("6a8098"), accent=Color3.fromHex("00d4ff"), accentDim=Color3.fromHex("00a8cc"), on=Color3.fromHex("00d4ff"), off=Color3.fromHex("4b5563"), warn=Color3.fromHex("e81123"), danger=Color3.fromHex("c50f1f"), success=Color3.fromHex("00d4ff")}, effects={corner=10, border=1}},
-    -- RBX Asset Background Presets (Puck Mode compatible)
-    Theme_12={id="Theme_12", name="Ocean", assetId="16119734667", colors={bg=Color3.fromHex("0a1628"), panel=Color3.fromHex("0f1f35"), panel2=Color3.fromHex("142844"), border=Color3.fromHex("1e3a5a"), borderHover=Color3.fromHex("2a4a70"), text=Color3.fromHex("e0e8f0"), subtext=Color3.fromHex("8aa0b8"), dim=Color3.fromHex("6a8098"), accent=Color3.fromHex("4a9eff"), accentDim=Color3.fromHex("3a8edf"), on=Color3.fromHex("5fdc82"), off=Color3.fromHex("4b5563"), warn=Color3.fromHex("e81123"), danger=Color3.fromHex("c50f1f"), success=Color3.fromHex("5fdc82")}, effects={corner=10, border=1}},
-    Theme_13={id="Theme_13", name="Dusk", assetId="16119734889", colors={bg=Color3.fromHex("1a0f14"), panel=Color3.fromHex("25141e"), panel2=Color3.fromHex("301828"), border=Color3.fromHex("4a2035"), borderHover=Color3.fromHex("5a2a45"), text=Color3.fromHex("f0e0e6"), subtext=Color3.fromHex("b898a8"), dim=Color3.fromHex("9a7a88"), accent=Color3.fromHex("ff6b9d"), accentDim=Color3.fromHex("df5a8d"), on=Color3.fromHex("5fdc82"), off=Color3.fromHex("4b5563"), warn=Color3.fromHex("ff8a6b"), danger=Color3.fromHex("c50f1f"), success=Color3.fromHex("5fdc82")}, effects={corner=10, border=1}},
-    Theme_14={id="Theme_14", name="Crimson", assetId="16119735012", colors={bg=Color3.fromHex("1a0a0a"), panel=Color3.fromHex("251010"), panel2=Color3.fromHex("301414"), border=Color3.fromHex("4a1a1a"), borderHover=Color3.fromHex("5a2424"), text=Color3.fromHex("f0e0e0"), subtext=Color3.fromHex("b89898"), dim=Color3.fromHex("9a7a7a"), accent=Color3.fromHex("ff4d4d"), accentDim=Color3.fromHex("df3a3a"), on=Color3.fromHex("5fdc82"), off=Color3.fromHex("4b5563"), warn=Color3.fromHex("ff6b6b"), danger=Color3.fromHex("c50f1f"), success=Color3.fromHex("5fdc82")}, effects={corner=10, border=1}},
-    Theme_15={id="Theme_15", name="Nebula", assetId="16119735234", colors={bg=Color3.fromHex("0f0a1a"), panel=Color3.fromHex("141025"), panel2=Color3.fromHex("1a1430"), border=Color3.fromHex("2a1a4a"), borderHover=Color3.fromHex("3a245a"), text=Color3.fromHex("e8e0f0"), subtext=Color3.fromHex("a098b8"), dim=Color3.fromHex("807a9a"), accent=Color3.fromHex("9b59ff"), accentDim=Color3.fromHex("8a48df"), on=Color3.fromHex("5fdc82"), off=Color3.fromHex("4b5563"), warn=Color3.fromHex("e84393"), danger=Color3.fromHex("c50f1f"), success=Color3.fromHex("5fdc82")}, effects={corner=10, border=1}},
-    Theme_16={id="Theme_16", name="Aurora", assetId="16119735456", colors={bg=Color3.fromHex("0a1a14"), panel=Color3.fromHex("0f251e"), panel2=Color3.fromHex("143028"), border=Color3.fromHex("1a4a3a"), borderHover=Color3.fromHex("245a4a"), text=Color3.fromHex("e0f0e8"), subtext=Color3.fromHex("98b8a8"), dim=Color3.fromHex("7a9a88"), accent=Color3.fromHex("2ecc71"), accentDim=Color3.fromHex("239a55"), on=Color3.fromHex("5fdc82"), off=Color3.fromHex("4b5563"), warn=Color3.fromHex("e74c3c"), danger=Color3.fromHex("c0392b"), success=Color3.fromHex("2ecc71")}, effects={corner=10, border=1}},
 }
 -- Active semantic tokens (Hub only)
 T={bg=THEMES.Theme_01.colors.bg, panel=THEMES.Theme_01.colors.panel, panel2=THEMES.Theme_01.colors.panel2, titleBar=Color3.fromHex("0f0f0f"), border=THEMES.Theme_01.colors.border, borderHover=THEMES.Theme_01.colors.borderHover, line=Color3.fromHex("252525"), text=THEMES.Theme_01.colors.text, subtext=THEMES.Theme_01.colors.subtext, dim=THEMES.Theme_01.colors.dim, accent=THEMES.Theme_01.colors.accent, accent2=Color3.fromHex("8a8dc2"), accentDim=THEMES.Theme_01.colors.accentDim, on=THEMES.Theme_01.colors.on, off=THEMES.Theme_01.colors.off, warn=THEMES.Theme_01.colors.warn, warnHover=Color3.fromHex("c50f1f"), danger=THEMES.Theme_01.colors.danger, success=THEMES.Theme_01.colors.success}
 -- titleBar stays near-black for contrast across themes; line matches border
-THEME_ORDER={"Theme_01","Theme_02","Theme_03","Theme_04","Theme_05","Theme_06","Theme_12","Theme_13","Theme_14","Theme_15","Theme_16","Theme_08","Theme_09","Theme_10","Theme_11","Theme_07"}
+THEME_ORDER={"Theme_01","Theme_02","Theme_03","Theme_04","Theme_05","Theme_06","Theme_08","Theme_09","Theme_10","Theme_11","Theme_07"}
 local THEME_ALIASES={Slate="Theme_01", Grey="Theme_02", Galaxy="Theme_03", Minimal="Theme_04", Midnight="Theme_05", Warm="Theme_06", Jester="Theme_08", Forest="Theme_09", Amethyst="Theme_10", Abyss="Theme_11"}
 local function normalizeThemeId(id) return THEME_ALIASES[id] or id or "Theme_01" end
 GOLD = Color3.fromRGB(201,168,106) -- selection gold outline
@@ -1274,18 +1267,18 @@ local function winBtn(txt,isClose)
     b.MouseButton1Down:Connect(function() b.BackgroundColor3 = isClose and T.warnHover or T.border end)
     return b
 end
-local btnMin=winBtn("_",false); local btnMax=winBtn("⬜",false); local btnClose=winBtn("×","�",true)
+local btnMin=winBtn("_",false); local btnMax=winBtn("?",false); local btnClose=winBtn("�",true)
 do local hold,holdT
     btnClose.MouseButton1Down:Connect(function() hold=true holdT=tick() task.spawn(function() while hold and tick()-holdT<0.9 do task.wait(0.05) end if hold and tick()-holdT>=0.9 then hold=false btnClose.Text="�"; task.wait(0.18) local fn=getgenv()[UNLOAD_KEY] if fn then pcall(fn) end btnClose.Text="�" end end) end)
     btnClose.MouseButton1Up:Connect(function() if not hold then return end local d=tick()-holdT hold=false btnClose.Text="�" if d<0.9 then tw(canvas,TweenInfo.new(0.16),{GroupTransparency=1}).Completed:Wait() screen.Enabled=false canvas.GroupTransparency=0 pushToast("Hidden | RightShift to restore","warn",2) end end)
     btnClose.MouseLeave:Connect(function() hold=false btnClose.Text="�" end)
 end
 
--- Puck = (equals sign, theme-compatible)
+-- Puck V
 local PUCK=56
 local puck=new("TextButton",{BackgroundColor3=T.panel, Size=offset(PUCK,PUCK), Position=offset(centeredPos(PUCK,PUCK).X,centeredPos(PUCK,PUCK).Y), Text="", AutoButtonColor=false, BorderSizePixel=0, Visible=false, ZIndex=40, Parent=screen}) corner(puck,16) stroke(puck,T.border,1)
 rootMaid:give(puck)
-new("TextLabel",{BackgroundTransparency=1, Size=UDim2.fromScale(1,1), Font=FONTB, Text="=", TextSize=22, TextColor3=T.text, ZIndex=41, Parent=puck})
+new("TextLabel",{BackgroundTransparency=1, Size=UDim2.fromScale(1,1), Font=FONTB, Text="V", TextSize=22, TextColor3=T.text, ZIndex=41, Parent=puck})
 local puckDot=new("Frame",{BackgroundColor3=T.on, Size=offset(10,10), Position=UDim2.new(1,-8,0,-2), Visible=false, ZIndex=42, Parent=puck}) corner(puckDot,5)
 local minimized=false; local animating=false; local isMax=false; local savedRect={pos=shellRect.pos, size=shellRect.size}
 local function doMinimize() if minimized or animating then return end animating=true minimized=true shellRect.pos=Vector2.new(shell.Position.X.Offset,shell.Position.Y.Offset) shellRect.size=Vector2.new(shell.AbsoluteSize.X,shell.AbsoluteSize.Y) local t=tw(canvas,TweenInfo.new(0.14),{GroupTransparency=1}) t.Completed:Wait() shell.Visible=false canvas.GroupTransparency=0 local vp=viewport() local p=Vector2.new(math.clamp(shellRect.pos.X+shellRect.size.X/2-PUCK/2,0,vp.X-PUCK), math.clamp(shellRect.pos.Y+shellRect.size.Y/2-PUCK/2,0,vp.Y-PUCK)) puck.Position=offset(p.X,p.Y) puck.Visible=true animating=false end
@@ -1298,7 +1291,7 @@ do local drag=false; local sd,sp
 end
 btnMin.Activated:Connect(doMinimize)
 local function fullscreenRect() local inset=GuiService:GetGuiInset() local vp=viewport() return Vector2.new(4,inset.Y+4), Vector2.new(vp.X-8, vp.Y-inset.Y-8) end
-btnMax.Activated:Connect(function() if minimized then return end if not isMax then savedRect.pos=Vector2.new(shell.Position.X.Offset,shell.Position.Y.Offset) savedRect.size=Vector2.new(shell.AbsoluteSize.X,shell.AbsoluteSize.Y) local p,s=fullscreenRect() tw(shell,MOTION.win,{Size=offset(s.X,s.Y), Position=offset(p.X,p.Y)}) tw(shellCorner,MOTION.win,{CornerRadius=UDim.new(0,0)}) btnMax.Text="⬜" isMax=true else tw(shell,MOTION.win,{Size=offset(savedRect.size.X,savedRect.size.Y), Position=offset(savedRect.pos.X,savedRect.pos.Y)}) tw(shellCorner,MOTION.win,{CornerRadius=UDim.new(0,10)}) btnMax.Text="❐" isMax=false end end)
+btnMax.Activated:Connect(function() if minimized then return end if not isMax then savedRect.pos=Vector2.new(shell.Position.X.Offset,shell.Position.Y.Offset) savedRect.size=Vector2.new(shell.AbsoluteSize.X,shell.AbsoluteSize.Y) local p,s=fullscreenRect() tw(shell,MOTION.win,{Size=offset(s.X,s.Y), Position=offset(p.X,p.Y)}) tw(shellCorner,MOTION.win,{CornerRadius=UDim.new(0,0)}) btnMax.Text="?" isMax=true else tw(shell,MOTION.win,{Size=offset(savedRect.size.X,savedRect.size.Y), Position=offset(savedRect.pos.X,savedRect.pos.Y)}) tw(shellCorner,MOTION.win,{CornerRadius=UDim.new(0,10)}) btnMax.Text="?" isMax=false end end)
 -- title drag gated by HubState.Draggable (independent from Verity), 20px viewport-safe clamp
 do local drag=false; local sd,sp
     local function clampShell(x,y)
@@ -2452,7 +2445,7 @@ end
 -- About tab (consolidated: identity, runtime, credits, games, contributions, diagnostics)
 do
     local AboutData={
-        Version="2.2",
+        Version="2.7.2",
         Build="10K-RP",
         SpecialThanks={"Verity team","Fleece Utility","SchizHub v7","Base_Rework","DarkHub","TokkuHub","Contributors"},
         FavoriteGames={
@@ -2470,22 +2463,19 @@ do
     
     local abCard=makeCard("About","Equilibrium — About","UI assets, credits, and build information")
     
-    -- Section helper: centered header, left-aligned content
-    local function makeSection(parent, title, subtitle)
-        local titleLabel=new("TextLabel",{BackgroundTransparency=1, Size=UDim2.new(1,0,0,14), Font=FONTB, Text=title, TextSize=11, TextColor3=T.text, TextXAlignment=Enum.TextXAlignment.Center, ZIndex=13, Parent=parent})
-        local subLabel = nil
-        if subtitle then
-            subLabel=new("TextLabel",{BackgroundTransparency=1, Size=UDim2.new(1,0,0,12), Font=FONT, Text=subtitle, TextSize=10, TextColor3=T.dim, TextXAlignment=Enum.TextXAlignment.Center, TextWrapped=true, ZIndex=13, Parent=parent})
-        end
-        return titleLabel, subLabel
+    -- Helper to create compact info cards
+    local function makeInfoCard(parent, title, contentText, textSize)
+        textSize = textSize or 10
+        local titleLabel=new("TextLabel",{BackgroundTransparency=1, Size=UDim2.new(1,0,0,13), Font=FONTB, Text=title, TextSize=10, TextColor3=T.text, TextXAlignment=Enum.TextXAlignment.Left, ZIndex=13, Parent=parent})
+        local contentLabel=new("TextLabel",{BackgroundTransparency=1, Size=UDim2.new(1,0,0,0), AutomaticSize=Enum.AutomaticSize.Y, Font=FONT, Text=contentText, TextSize=textSize, TextColor3=T.dim, TextWrapped=true, ZIndex=13, Parent=parent})
+        return titleLabel, contentLabel
     end
     
-    -- Identity section (card layout)
-    local identityCard=new("Frame",{BackgroundColor3=T.panel, BackgroundTransparency=0.5, Size=UDim2.new(1,0,0,0), AutomaticSize=Enum.AutomaticSize.Y, ZIndex=13, Parent=abCard}) corner(identityCard,10) stroke(identityCard,T.border,1) pad(identityCard,12,12,12,12)
-    local idLayout=new("UIListLayout",{SortOrder=Enum.SortOrder.LayoutOrder, Padding=UDim2.fromOffset(0,10), Parent=identityCard})
-    makeSection(identityCard, "BUILD INFO", string.format("Version %s · Build %s", AboutData.Version, AboutData.Build))
+    -- Identity card
     local sig=runtimeSignature()
-    local sigLabel=new("TextLabel",{BackgroundTransparency=1, Size=UDim2.new(1,0,0,12), Font=FONT, Text="Runtime Signature: Heartbeats-"..(sig.HeartbeatsObserved or 3), TextSize=10, TextColor3=T.dim, TextXAlignment=Enum.TextXAlignment.Center, ZIndex=13, Parent=identityCard})
+    local identityText=string.format("Version %s | Build %s | RuntimeSignature Heartbeats=%d", 
+        AboutData.Version, AboutData.Build, sig.HeartbeatsObserved or 3)
+    makeInfoCard(abCard, "Identity", identityText, 9)
     
     -- Asset Inserter (kept as functional section above/below About content)
     local assetSeparator=new("Frame",{BackgroundColor3=T.border, BackgroundTransparency=0.5, Size=UDim2.new(1,0,0,1), ZIndex=12, Parent=abCard})
@@ -2653,7 +2643,7 @@ task.delay(0.12,function()
         mount()
         screen.Enabled=true
     end
-    pushToast("Equilibrium v2.2 • Universal Hub", "warn", 2.5)
+    pushToast("Equilibrium v1.1 | Slate 070707 | _ ? | | V puck | ??="..(VerityState.Locked and "locked" or "unlocked"), "warn",4)
     print("[Equilibrium] visible | where="..where.." size="..tostring(shell.AbsoluteSize))
 end)
 
