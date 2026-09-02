@@ -1213,7 +1213,8 @@ function applyShellGeometry(viewportSize)
 end
 shell=new("Frame",{BackgroundColor3=T.bg, Size=offset(W,H), Position=offset(shellRect.pos.X,shellRect.pos.Y), BorderSizePixel=0, ClipsDescendants=true, ZIndex=10, Parent=screen})
 local shellCorner=corner(shell, hubAppearance.CornerRadius or 10); shellStroke=stroke(shell,T.border,1)
-local hubScale=new("UIScale",{Scale=hubAppearance.Scale, Parent=shell})
+-- Remove UIScale transform to fix blurry text and fullscreen stretching
+-- Sizing is now handled via responsive CSS-like dimensions, not global scale
 canvas=new("CanvasGroup",{BackgroundTransparency=1, Size=UDim2.fromScale(1,1), GroupTransparency=hubAppearance.Transparency/100, ZIndex=11, Parent=shell})
 -- apply stored visual style
 setBorderStyle(hubAppearance.BorderEnabled~=false, hubAppearance.BorderThickness)
@@ -1245,8 +1246,17 @@ Verity.locked = VerityState.Locked
 -- Hub brand icon (circle, hub-only, not Verity)
 
 
-new("TextLabel",{BackgroundTransparency=1, Size=UDim2.new(1,-190,1,0), Position=offset(42,-2), Font=FONTB, Text="Universal Hub Menu", TextSize=13, TextColor3=T.text, TextXAlignment=Enum.TextXAlignment.Left, ZIndex=13, Parent=titleBar})
-new("TextLabel",{BackgroundTransparency=1, Size=UDim2.new(1,-190,1,0), Position=offset(42,10), Font=FONT, Text="Universal  |  2.7.2", TextSize=9, TextColor3=T.dim, TextXAlignment=Enum.TextXAlignment.Left, ZIndex=13, Parent=titleBar})
+-- Text sizing tokens (responsive, no scale transform)
+local TEXT_SIZES = {
+    Title = 13,
+    Body = 10,
+    Small = 9,
+    Button = 11,
+    Caption = 8
+}
+
+new("TextLabel",{BackgroundTransparency=1, Size=UDim2.new(1,-190,1,0), Position=offset(42,-2), Font=FONTB, Text="Universal Hub Menu", TextSize=TEXT_SIZES.Title, TextColor3=T.text, TextXAlignment=Enum.TextXAlignment.Left, ZIndex=13, Parent=titleBar})
+new("TextLabel",{BackgroundTransparency=1, Size=UDim2.new(1,-190,1,0), Position=offset(42,10), Font=FONT, Text="Universal  |  2.7.2", TextSize=TEXT_SIZES.Small, TextColor3=T.dim, TextXAlignment=Enum.TextXAlignment.Left, ZIndex=13, Parent=titleBar})
 
 -- Windows buttons _ ? ?
 local winRow=new("Frame",{BackgroundTransparency=1, Size=offset(138,36), AnchorPoint=Vector2.new(1,0), Position=UDim2.new(1,0,0,0), ZIndex=13, Parent=titleBar}) hlist(winRow,0)
@@ -1480,6 +1490,56 @@ do
     local promptGui, promptBox, promptFolderBox, promptSaveBtn, promptCancelBtn
     local promptSaveConn, promptCancelConn, promptEnterConn
     
+    -- Simple InputBox helper for rename/delete operations
+    local function InputBox(title, defaultValue)
+        if not promptGui or not promptGui.Parent then
+            ensurePrompt()
+        end
+        local boxFrame = promptGui:FindFirstChildWhichIsA("Frame")
+        local titleLabel = boxFrame:FindFirstChild("TitleLabel")
+        if not titleLabel then
+            titleLabel = new("TextLabel",{BackgroundTransparency=1, Size=UDim2.new(1,0,0,16), Font=FONTB, Text=title, TextSize=12, TextColor3=T.text, ZIndex=52, Parent=boxFrame})
+            titleLabel.Name = "TitleLabel"
+        else
+            titleLabel.Text = title
+        end
+        local inputBox = boxFrame:FindFirstChildWhichIsA("TextBox")
+        if inputBox then
+            inputBox.Text = defaultValue or ""
+            inputBox.PlaceholderText = "Enter text..."
+        end
+        local folderBox = boxFrame:FindFirstChild("TextBox", true)
+        if folderBox and folderBox ~= inputBox then folderBox.Visible = false end
+        promptGui.Visible = true
+        if inputBox then inputBox:CaptureFocus() end
+        
+        local result = nil
+        local done = false
+        local saveBtn = boxFrame:FindFirstChildWhichIsA("TextButton")
+        local cancelBtn = boxFrame:FindFirstChild("TextButton", true)
+        
+        if promptSaveConn then promptSaveConn:Disconnect() end
+        if promptCancelConn then promptCancelConn:Disconnect() end
+        
+        if saveBtn then
+            promptSaveConn = saveBtn.Activated:Connect(function()
+                result = inputBox and inputBox.Text or ""
+                promptGui.Visible = false
+                done = true
+            end)
+        end
+        
+        if cancelBtn and cancelBtn ~= saveBtn then
+            promptCancelConn = cancelBtn.Activated:Connect(function()
+                promptGui.Visible = false
+                done = true
+            end)
+        end
+        
+        while not done do task.wait(0.1) end
+        return result
+    end
+
     local function ensurePrompt()
         if promptGui and promptGui.Parent then return promptGui, promptBox, promptSaveBtn, promptCancelBtn, promptFolderBox end
         promptGui = new("Frame",{BackgroundColor3=Color3.fromRGB(0,0,0), BackgroundTransparency=0.35, Size=UDim2.fromScale(1,1), Visible=false, ZIndex=50, Parent=screen})
@@ -1721,13 +1781,19 @@ do
             
             local menuBtn = new("TextButton",{BackgroundColor3=T.panel, Size=offset(28,22), Position=UDim2.new(1,-78,0,10), Text="⋮", Font=FONTB, TextSize=14, TextColor3=T.dim, AutoButtonColor=false, ZIndex=16, Parent=card}) corner(menuBtn,6)
             menuBtn.Activated:Connect(function()
-                -- Simple context: rename, delete, move to folder
-                local newName = InputBox("Rename position", pos.name)
+                -- Context menu for position: rename, delete, move to folder
+                local action = nil
+                local newName = InputBox("Rename position (or type DELETE to remove)", pos.name)
                 if newName and newName ~= "" then
-                    pos.name = newName
-                    pos.updatedAt = os.time()
-                    saveBank(state)
-                    pcall(refreshTree)
+                    if newName:upper() == "DELETE" then
+                        deletePosition(pos.id)
+                    else
+                        pos.name = newName
+                        pos.updatedAt = os.time()
+                        saveBank(state)
+                        pcall(refreshTree)
+                        pushToast("Renamed position","warn",1)
+                    end
                 end
             end)
             
@@ -1756,10 +1822,21 @@ do
             
             local delBtn = new("TextButton",{BackgroundColor3=T.panel, Size=offset(32,22), Position=UDim2.new(1,-36,0,1), Text="⋮", Font=FONTB, TextSize=12, TextColor3=T.dim, AutoButtonColor=false, ZIndex=15, Parent=folderCard}) corner(delBtn,6)
             delBtn.Activated:Connect(function()
-                -- Delete folder with option
-                local moveContents = true -- default to moving contents to root
-                deleteFolder(folder.id, moveContents)
-                pushToast("Deleted folder","warn",1.2)
+                -- Delete folder with option dialog
+                local choice = nil
+                -- Simple inline prompt: rename or delete
+                local newName = InputBox("Rename folder or type DELETE to remove", folder.name)
+                if newName and newName ~= "" then
+                    if newName:upper() == "DELETE" then
+                        deleteFolder(folder.id, true) -- move contents to root
+                        pushToast("Deleted folder","warn",1.2)
+                    else
+                        folder.name = newName
+                        saveBank(state)
+                        pcall(refreshTree)
+                        pushToast("Renamed folder","warn",1)
+                    end
+                end
             end)
             
             -- Render folder contents if expanded
@@ -1784,8 +1861,19 @@ do
                     
                     local menuBtn2 = new("TextButton",{BackgroundTransparency=1, Size=offset(24,18), Position=UDim2.new(1,-80,0,10), Text="⋮", Font=FONTB, TextSize=11, TextColor3=T.dim, AutoButtonColor=false, ZIndex=16, Parent=posCard})
                     menuBtn2.Activated:Connect(function()
-                        movePositionToFolder(pos.id, nil) -- move to root
-                        pushToast("Moved to root","warn",1)
+                        -- Context menu for folder position: rename, delete, move to root/another folder
+                        local newName = InputBox("Rename position (or type DELETE to remove)", pos.name)
+                        if newName and newName ~= "" then
+                            if newName:upper() == "DELETE" then
+                                deletePosition(pos.id)
+                            else
+                                pos.name = newName
+                                pos.updatedAt = os.time()
+                                saveBank(state)
+                                pcall(refreshTree)
+                                pushToast("Renamed position","warn",1)
+                            end
+                        end
                     end)
                     
                     posCard.MouseEnter:Connect(function() posCard.BackgroundColor3=T.panel end)
@@ -2145,7 +2233,8 @@ do
         local b=new("TextButton",{BackgroundColor3=(math.abs(hubAppearance.Scale-scale)<0.01) and T.accent or T.panel, Size=UDim2.new(0,64,0,28), Text=name, Font=FONT, TextSize=11, TextColor3=(math.abs(hubAppearance.Scale-scale)<0.01) and T.text or T.dim, AutoButtonColor=false, ZIndex=14, Parent=sizeRow}) corner(b,8) stroke(b,T.border,1)
         b.Activated:Connect(function()
             hubAppearance.Scale=scale
-            if hubScale then hubScale.Scale=scale end
+            -- Scale value now stored in hubAppearance but not applied via UIScale
+            -- Responsive sizing handles dimensions directly
             Settings:Set("hubAppearance", hubAppearance, "global"); Settings:Save("global")
             refreshSize(); refreshSummary(); RefreshAppearancePreview()
             pushToast("Size: "..name,"warn",1.2)
@@ -2301,7 +2390,7 @@ do
         hubAppearance.GlowEnabled = false
         
         HubState.Mode = "Draggable"
-        if hubScale then hubScale.Scale = 1.0 end
+        -- hubScale removed; responsive sizing handles dimensions
         if HubCanvasGroup then HubCanvasGroup.GroupTransparency = 0 end
         local vp = viewport(); local sw,sh = shell.AbsoluteSize.X, shell.AbsoluteSize.Y
         shell.Position = offset(math.floor((vp.X-sw)/2), math.floor((vp.Y-sh)/2))
