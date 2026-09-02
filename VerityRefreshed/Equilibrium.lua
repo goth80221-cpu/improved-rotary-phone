@@ -139,22 +139,49 @@ _G.ThemeAuditAll = function() local out={} for _,id in ipairs(THEME_ORDER) do ou
 -- Verity identity palette | fixed black/gold, never themed by Hub (ThemeLocked authoritative)
 local VERITY_THEME = { bg=Color3.fromHex("070707"), panel=Color3.fromHex("141414"), border=Color3.fromRGB(201,168,106), text=Color3.fromHex("e6e6e6"), dim=Color3.fromHex("a0a0a8"), accent=Color3.fromRGB(201,168,106), on=Color3.fromHex("5fdc82"), off=Color3.fromHex("4b5563"), warn=Color3.fromHex("e81123") }
 -- Hub Appearance persisted (Settings global hubAppearance)
--- PositionMode: single state Draggable/Locked with migration from old Draggable/Locked booleans
-hubAppearance = {Theme="Theme_01", Scale=1.0, Position=nil, Transparency=0, PositionMode="Draggable", RememberPosition=true, BorderEnabled=true, BorderThickness=1, CornerRadius=10, ShadowsEnabled=true, GlowEnabled=false, TextScale=1.0, ClipEnabled=true}
+-- New preset-based architecture: BaseTheme + UserOverrides = ResolvedAppearance
+hubAppearance = {
+    PresetId = "Theme_01",
+    BaseTheme = "Theme_01",
+    Overrides = {},
+    -- Legacy compatibility fields (migrated on load)
+    Theme = "Theme_01",
+    Scale = 1.0,
+    Position = nil,
+    Transparency = 0,
+    PositionMode = "Draggable",
+    RememberPosition = true,
+    BorderEnabled = true,
+    BorderThickness = 1,
+    CornerRadius = 10,
+    ShadowsEnabled = true,
+    GlowEnabled = false,
+    TextScale = 1.0,
+    ClipEnabled = true,
+    CustomColors = nil,
+}
+
+-- Check if appearance has unsaved changes vs saved preset
 function isAppearanceDirty(current, saved)
     saved = saved or Settings:Get("hubAppearance","global") or {}
-    return current.Theme ~= normalizeThemeId(saved.Theme or saved.theme)
-        or current.Scale ~= saved.Scale
-        or current.Transparency ~= saved.Transparency
-        or current.TextScale ~= saved.TextScale
-        or current.Position ~= saved.Position
-        or current.PositionMode ~= saved.PositionMode
-        or current.BorderEnabled ~= saved.BorderEnabled
-        or current.BorderThickness ~= saved.BorderThickness
-        or current.CornerRadius ~= saved.CornerRadius
-        or current.ShadowsEnabled ~= saved.ShadowsEnabled
-        or current.GlowEnabled ~= saved.GlowEnabled
-        or current.RememberPosition ~= saved.RememberPosition
+    if not saved then return false end
+    local keys = {"PresetId", "BaseTheme", "Scale", "Transparency", "BorderEnabled", "BorderThickness", "CornerRadius", "ShadowsEnabled", "GlowEnabled"}
+    for _,k in ipairs(keys) do
+        if current[k] ~= saved[k] then return true end
+    end
+    if current.Overrides and saved.Overrides then
+        for k,v in pairs(current.Overrides) do
+            if saved.Overrides[k] ~= v then return true end
+        end
+        for k,v in pairs(saved.Overrides) do
+            if current.Overrides[k] ~= v then return true end
+        end
+    elseif current.Overrides or saved.Overrides then
+        return true
+    end
+    -- Legacy field check
+    if current.Theme ~= normalizeThemeId(saved.Theme or saved.theme) then return true end
+    return false
 end
 -- PresentationState — derived UI presentation, not intelligence
 PresentationState = { NavigationMode="Sidebar", Viewport=Vector2.new(620,520), WindowState="Normal", AppearanceGeneration=0 }
@@ -960,23 +987,72 @@ function ThemeSystem.SetHubTheme(themeId, save) ApplyTheme(themeId, "Hub", save)
 function ThemeSystem.SetSharedTheme(themeId) ApplyTheme(themeId, "Shared", false) end
 function ThemeSystem.SetVerityTheme() return VERITY_THEME end
 local function RefreshTheme() ApplyTheme(hubAppearance.Theme, "Hub", false) end
+
+-- ResolveAppearance: BaseTheme + UserOverrides = final appearance config
+-- Returns a snapshot, not persistent state
+local function ResolveAppearance()
+    local baseId = hubAppearance.BaseTheme or hubAppearance.PresetId or "Theme_01"
+    local baseTheme = THEMES[baseId] or THEMES.Theme_01
+    local overrides = hubAppearance.Overrides or {}
+    
+    -- Build resolved config from base + overrides
+    local resolved = {
+        BaseTheme = baseId,
+        PresetId = hubAppearance.PresetId or baseId,
+        Theme = baseId,
+        Scale = overrides.Scale or hubAppearance.Scale or 1.0,
+        Transparency = overrides.Transparency or hubAppearance.Transparency or 0,
+        BorderEnabled = overrides.BorderEnabled ~= nil and overrides.BorderEnabled or hubAppearance.BorderEnabled,
+        BorderThickness = overrides.BorderThickness or hubAppearance.BorderThickness or 1,
+        CornerRadius = overrides.CornerRadius or hubAppearance.CornerRadius or 10,
+        ShadowsEnabled = overrides.ShadowsEnabled ~= nil and overrides.ShadowsEnabled or hubAppearance.ShadowsEnabled,
+        GlowEnabled = overrides.GlowEnabled ~= nil and overrides.GlowEnabled or hubAppearance.GlowEnabled,
+        PositionMode = overrides.PositionMode or hubAppearance.PositionMode or "Draggable",
+        Position = overrides.Position or hubAppearance.Position,
+        RememberPosition = overrides.RememberPosition ~= nil and overrides.RememberPosition or hubAppearance.RememberPosition,
+        CustomColors = overrides.CustomColors or hubAppearance.CustomColors,
+        Modified = isAppearanceDirty(hubAppearance),
+    }
+    return resolved
+end
+
 -- Load saved appearance on boot (before UI creation, T already Slate)
 do
     local saved = Settings:Get("hubAppearance","global")
     if type(saved)=="table" and saved.Theme and THEMES[saved.Theme] then
-        hubAppearance = saved
+        -- Migrate legacy flat structure to new preset-based structure
+        hubAppearance.PresetId = saved.PresetId or saved.Theme
+        hubAppearance.BaseTheme = saved.BaseTheme or saved.Theme
+        hubAppearance.Overrides = saved.Overrides or {}
+        hubAppearance.Theme = saved.Theme
+        hubAppearance.Scale = saved.Scale or 1.0
+        hubAppearance.Transparency = saved.Transparency or 0
+        hubAppearance.BorderEnabled = saved.BorderEnabled ~= nil and saved.BorderEnabled or true
+        hubAppearance.BorderThickness = saved.BorderThickness or 1
+        hubAppearance.CornerRadius = saved.CornerRadius or 10
+        hubAppearance.ShadowsEnabled = saved.ShadowsEnabled ~= nil and saved.ShadowsEnabled or true
+        hubAppearance.GlowEnabled = saved.GlowEnabled or false
+        hubAppearance.CustomColors = saved.CustomColors
+        
         -- migrate old Draggable/Locked booleans to single PositionMode
-        if hubAppearance.PositionMode == nil then
-            if hubAppearance.Locked == true then hubAppearance.PositionMode="Locked"
-            elseif hubAppearance.Draggable == false then hubAppearance.PositionMode="Locked"
-            else hubAppearance.PositionMode="Draggable" end
-            hubAppearance.Draggable=nil hubAppearance.Locked=nil
-            Settings:Set("hubAppearance", hubAppearance, "global"); Settings:Save("global")
+        if saved.PositionMode then
+            hubAppearance.PositionMode = saved.PositionMode
+        elseif saved.Locked == true then
+            hubAppearance.PositionMode = "Locked"
+        elseif saved.Draggable == false then
+            hubAppearance.PositionMode = "Locked"
+        else
+            hubAppearance.PositionMode = "Draggable"
         end
-        if hubAppearance.PositionMode ~= "Locked" then hubAppearance.PositionMode="Draggable" end
+        hubAppearance.Draggable = nil
+        hubAppearance.Locked = nil
+        hubAppearance.Position = saved.Position
+        
+        if hubAppearance.PositionMode ~= "Locked" then hubAppearance.PositionMode = "Draggable" end
         HubState.Mode = hubAppearance.PositionMode
+        
         -- apply without save to avoid overwrite
-        for k,v in pairs(THEMES[saved.Theme].colors) do T[k]=v end
+        for k,v in pairs(THEMES[hubAppearance.Theme].colors) do T[k]=v end
         T.titleBar=Color3.fromHex("0f0f0f"); T.line=T.border
     end
 end
@@ -1137,7 +1213,8 @@ function applyShellGeometry(viewportSize)
 end
 shell=new("Frame",{BackgroundColor3=T.bg, Size=offset(W,H), Position=offset(shellRect.pos.X,shellRect.pos.Y), BorderSizePixel=0, ClipsDescendants=true, ZIndex=10, Parent=screen})
 local shellCorner=corner(shell, hubAppearance.CornerRadius or 10); shellStroke=stroke(shell,T.border,1)
-local hubScale=new("UIScale",{Scale=hubAppearance.Scale, Parent=shell})
+-- Remove UIScale transform to fix blurry text and fullscreen stretching
+-- Sizing is now handled via responsive CSS-like dimensions, not global scale
 canvas=new("CanvasGroup",{BackgroundTransparency=1, Size=UDim2.fromScale(1,1), GroupTransparency=hubAppearance.Transparency/100, ZIndex=11, Parent=shell})
 -- apply stored visual style
 setBorderStyle(hubAppearance.BorderEnabled~=false, hubAppearance.BorderThickness)
@@ -1169,8 +1246,17 @@ Verity.locked = VerityState.Locked
 -- Hub brand icon (circle, hub-only, not Verity)
 
 
-new("TextLabel",{BackgroundTransparency=1, Size=UDim2.new(1,-190,1,0), Position=offset(42,-2), Font=FONTB, Text="Universal Hub Menu", TextSize=13, TextColor3=T.text, TextXAlignment=Enum.TextXAlignment.Left, ZIndex=13, Parent=titleBar})
-new("TextLabel",{BackgroundTransparency=1, Size=UDim2.new(1,-190,1,0), Position=offset(42,10), Font=FONT, Text="Universal  |  2.7.2", TextSize=9, TextColor3=T.dim, TextXAlignment=Enum.TextXAlignment.Left, ZIndex=13, Parent=titleBar})
+-- Text sizing tokens (responsive, no scale transform)
+local TEXT_SIZES = {
+    Title = 13,
+    Body = 10,
+    Small = 9,
+    Button = 11,
+    Caption = 8
+}
+
+new("TextLabel",{BackgroundTransparency=1, Size=UDim2.new(1,-190,1,0), Position=offset(42,-2), Font=FONTB, Text="Universal Hub Menu", TextSize=TEXT_SIZES.Title, TextColor3=T.text, TextXAlignment=Enum.TextXAlignment.Left, ZIndex=13, Parent=titleBar})
+new("TextLabel",{BackgroundTransparency=1, Size=UDim2.new(1,-190,1,0), Position=offset(42,10), Font=FONT, Text="Universal  |  2.7.2", TextSize=TEXT_SIZES.Small, TextColor3=T.dim, TextXAlignment=Enum.TextXAlignment.Left, ZIndex=13, Parent=titleBar})
 
 -- Windows buttons _ ? ?
 local winRow=new("Frame",{BackgroundTransparency=1, Size=offset(138,36), AnchorPoint=Vector2.new(1,0), Position=UDim2.new(1,0,0,0), ZIndex=13, Parent=titleBar}) hlist(winRow,0)
@@ -1361,59 +1447,118 @@ for _,cat in ipairs(TABS) do for _,def in ipairs(catMap[cat] or {}) do
         end)
     end end
 end end
--- ===== PASS 2: TP BANK (12 pos+lookVector, Settings:place.features.tpBank) polished like SchizHub old bank =====
+-- ===== PASS 2: TP BANK (file-explorer style, folders as tree, drag-drop, stable IDs) =====
 do
-    local function getBank() local b=Settings:Get("tpBank","place") if type(b)~="table" then b={} Settings:Set("tpBank",b,"place") end return b end
-    local function saveBank(b) Settings:Set("tpBank",b,"place") Settings:Save("place") _G.TPBank = _G.TPBank or {} _G.TPBank._bank=b _G.AssistantContext=_G.AssistantContext or {} _G.AssistantContext.tpBank=b end
+    -- Data model: positions can exist at root (folderId=nil) or inside folders
+    local TPBankState = { positions={}, folders={} }
+    local function getBank() 
+        local b=Settings:Get("tpBank","place") 
+        if type(b)~="table" then b={positions={}, folders={}} end
+        TPBankState.positions = b.positions or {}
+        TPBankState.folders = b.folders or {}
+        return TPBankState 
+    end
+    local function saveBank(state) 
+        state = state or TPBankState
+        Settings:Set("tpBank",{positions=state.positions or {}, folders=state.folders or {}},"place") 
+        Settings:Save("place") 
+        _G.TPBank = _G.TPBank or {} 
+        _G.TPBank._bank=state 
+        _G.AssistantContext=_G.AssistantContext or {} 
+        _G.AssistantContext.tpBank=state 
+    end
     local function serialize(cf) local p=cf.Position local l=cf.LookVector return {px=p.X,py=p.Y,pz=p.Z, lx=l.X,ly=l.Y,lz=l.Z} end
     local function deserialize(d) local p=Vector3.new(d.px,d.py,d.pz) local l=Vector3.new(d.lx or 0,d.ly or 0,d.lz or 1) return CFrame.new(p, p+l) end
+    
+    -- Stable action IDs
+    local TPActions = {
+        SavePosition = "tpbank.save",
+        GoPosition = "tpbank.go",
+        EditPosition = "tpbank.edit",
+        DeletePosition = "tpbank.delete",
+        MoveToFolder = "tpbank.move",
+        CreateFolder = "tpbank.folder.create",
+        RenameFolder = "tpbank.folder.rename",
+        DeleteFolder = "tpbank.folder.delete",
+        Export = "tpbank.export",
+        Import = "tpbank.import",
+    }
+    
+    -- UI state
+    local expandedFolders = {}
+    local draggedItem = nil
     local promptGui, promptBox, promptFolderBox, promptSaveBtn, promptCancelBtn
     local promptSaveConn, promptCancelConn, promptEnterConn
+    
+    -- Simple InputBox helper for rename/delete operations
+    local function InputBox(title, defaultValue)
+        if not promptGui or not promptGui.Parent then
+            ensurePrompt()
+        end
+        local boxFrame = promptGui:FindFirstChildWhichIsA("Frame")
+        local titleLabel = boxFrame:FindFirstChild("TitleLabel")
+        if not titleLabel then
+            titleLabel = new("TextLabel",{BackgroundTransparency=1, Size=UDim2.new(1,0,0,16), Font=FONTB, Text=title, TextSize=12, TextColor3=T.text, ZIndex=52, Parent=boxFrame})
+            titleLabel.Name = "TitleLabel"
+        else
+            titleLabel.Text = title
+        end
+        local inputBox = boxFrame:FindFirstChildWhichIsA("TextBox")
+        if inputBox then
+            inputBox.Text = defaultValue or ""
+            inputBox.PlaceholderText = "Enter text..."
+        end
+        local folderBox = boxFrame:FindFirstChild("TextBox", true)
+        if folderBox and folderBox ~= inputBox then folderBox.Visible = false end
+        promptGui.Visible = true
+        if inputBox then inputBox:CaptureFocus() end
+        
+        local result = nil
+        local done = false
+        local saveBtn = boxFrame:FindFirstChildWhichIsA("TextButton")
+        local cancelBtn = boxFrame:FindFirstChild("TextButton", true)
+        
+        if promptSaveConn then promptSaveConn:Disconnect() end
+        if promptCancelConn then promptCancelConn:Disconnect() end
+        
+        if saveBtn then
+            promptSaveConn = saveBtn.Activated:Connect(function()
+                result = inputBox and inputBox.Text or ""
+                promptGui.Visible = false
+                done = true
+            end)
+        end
+        
+        if cancelBtn and cancelBtn ~= saveBtn then
+            promptCancelConn = cancelBtn.Activated:Connect(function()
+                promptGui.Visible = false
+                done = true
+            end)
+        end
+        
+        while not done do task.wait(0.1) end
+        return result
+    end
+
     local function ensurePrompt()
         if promptGui and promptGui.Parent then return promptGui, promptBox, promptSaveBtn, promptCancelBtn, promptFolderBox end
         promptGui = new("Frame",{BackgroundColor3=Color3.fromRGB(0,0,0), BackgroundTransparency=0.35, Size=UDim2.fromScale(1,1), Visible=false, ZIndex=50, Parent=screen})
-        local box = new("Frame",{BackgroundColor3=T.panel, Size=offset(300,132), Position=UDim2.new(0.5,0,0.5,0), AnchorPoint=Vector2.new(0.5,0.5), ZIndex=51, Parent=promptGui}) corner(box,12) stroke(box,T.border,1) pad(box,12,12,12,12) vlist(box,8)
-        new("TextLabel",{BackgroundTransparency=1, Size=UDim2.new(1,0,0,16), Font=FONTB, Text="Save TP", TextSize=12, TextColor3=T.text, ZIndex=52, Parent=box})
-        promptBox = new("TextBox",{BackgroundColor3=T.bg, Size=UDim2.new(1,0,0,28), Font=FONT, Text="", PlaceholderText="TP_1", PlaceholderColor3=T.dim, TextSize=12, TextColor3=T.text, ClearTextOnFocus=false, ZIndex=52, Parent=box}) corner(promptBox,8) stroke(promptBox,T.border,1) pad(promptBox,0,0,8,8)
-        promptFolderBox = new("TextBox",{BackgroundColor3=T.bg, Size=UDim2.new(1,0,0,28), Font=FONT, Text="", PlaceholderText="Folder (optional)", PlaceholderColor3=T.dim, TextSize=11, TextColor3=T.text, ClearTextOnFocus=false, ZIndex=52, Parent=box}) corner(promptFolderBox,8) stroke(promptFolderBox,T.border,1) pad(promptFolderBox,0,0,8,8)
+        local box = new("Frame",{BackgroundColor3=T.panel, Size=offset(300,140), Position=UDim2.new(0.5,0,0.5,0), AnchorPoint=Vector2.new(0.5,0.5), ZIndex=51, Parent=promptGui}) corner(box,12) stroke(box,T.border,1) pad(box,12,12,12,12) vlist(box,8)
+        new("TextLabel",{BackgroundTransparency=1, Size=UDim2.new(1,0,0,16), Font=FONTB, Text="Save Position", TextSize=12, TextColor3=T.text, ZIndex=52, Parent=box})
+        promptBox = new("TextBox",{BackgroundColor3=T.bg, Size=UDim2.new(1,0,0,28), Font=FONT, Text="", PlaceholderText="New checkpoint", PlaceholderColor3=T.dim, TextSize=12, TextColor3=T.text, ClearTextOnFocus=false, ZIndex=52, Parent=box}) corner(promptBox,8) stroke(promptBox,T.border,1) pad(promptBox,0,0,8,8)
+        promptFolderBox = new("TextBox",{BackgroundColor3=T.bg, Size=UDim2.new(1,0,0,28), Font=FONT, Text="", PlaceholderText="Folder name (optional)", PlaceholderColor3=T.dim, TextSize=11, TextColor3=T.text, ClearTextOnFocus=false, ZIndex=52, Parent=box}) corner(promptFolderBox,8) stroke(promptFolderBox,T.border,1) pad(promptFolderBox,0,0,8,8)
         local row=new("Frame",{BackgroundTransparency=1, Size=UDim2.new(1,0,0,28), ZIndex=52, Parent=box}) hlist(row,6)
         promptSaveBtn = new("TextButton",{BackgroundColor3=T.accent, Size=UDim2.new(0.5,-4,0,28), Text="Save", Font=FONTB, TextSize=12, TextColor3=T.text, AutoButtonColor=false, ZIndex=53, Parent=row}) corner(promptSaveBtn,8)
         promptCancelBtn = new("TextButton",{BackgroundColor3=T.panel, Size=UDim2.new(0.5,-4,0,28), Text="Cancel", Font=FONT, TextSize=12, TextColor3=T.text, AutoButtonColor=false, ZIndex=53, Parent=row}) corner(promptCancelBtn,8) stroke(promptCancelBtn,T.border,1)
         promptCancelBtn.Activated:Connect(function() promptGui.Visible=false end)
         return promptGui, promptBox, promptSaveBtn, promptCancelBtn, promptFolderBox
     end
-    local tpCard = makeCard("Teleport", "TP Bank", "12 slots | Position + LookVector | Instant")
-    -- Tip for rework
-    new("TextLabel",{BackgroundTransparency=1, Size=UDim2.new(1,0,0,14), Font=FONT, Text="Tip: Folders always visible — click to load XYZ, double-click to teleport. Both modes always on.", TextSize=9, TextColor3=T.subtext, TextWrapped=true, ZIndex=13, Parent=tpCard})
-    -- Folders row (always visible)
-    local folderRow = new("Frame",{BackgroundTransparency=1, Size=UDim2.new(1,0,0,28), ZIndex=13, Parent=tpCard}) hlist(folderRow,6)
-    local selectedFolder = "Folder1"
-    local folderBtns = {}
-    local lastFolderClick = {}
-    for _, fname in ipairs({"Folder 1","Folder 2"}) do
-        local displayName = "📁 "..fname
-        local b=new("TextButton",{BackgroundColor3=T.panel, Size=UDim2.new(0.5,-3,0,28), Text=displayName, Font=FONTB, TextSize=11, TextColor3=T.dim, AutoButtonColor=false, ZIndex=14, Parent=folderRow}) corner(b,8) stroke(b,T.border,1)
-        b.Activated:Connect(function()
-            local now=tick()
-            local isDouble = lastFolderClick[fname] and now - lastFolderClick[fname] < 0.35
-            lastFolderClick[fname]=now
-            selectedFolder = fname:gsub(" ","")
-            for _,bb in pairs(folderBtns) do bb.TextColor3=T.dim; bb.BackgroundColor3=T.panel end
-            b.BackgroundColor3=T.accent; b.TextColor3=T.text
-            pcall(function() refreshGrid() end)
-            if isDouble then
-                -- double-click open: highlight first coord and autofill xyz
-                local bank=getBank()
-                for _,e in ipairs(bank) do if (e.folder or "Folder1"):lower()==selectedFolder:lower() then
-                    pcall(function() xyzBox.Text=string.format("%.1f, %.1f, %.1f", e.px or 0, e.py or 0, e.pz or 0) end)
-                    break
-                end end
-            end
-        end)
-        folderBtns[fname]=b
-    end
-    folderBtns["Folder 1"].BackgroundColor3=T.accent; folderBtns["Folder 1"].TextColor3=T.text
-    -- XYZ field + Go button (like rbxasset)
+    
+    local tpCard = makeCard("Teleport", "TP Bank", "12 slots · Position + Look Vector · Instant")
+    -- Tip
+    new("TextLabel",{BackgroundTransparency=1, Size=UDim2.new(1,0,0,14), Font=FONT, Text="Tip: Ctrl-click to look, double-click to teleport", TextSize=9, TextColor3=T.subtext, TextWrapped=true, ZIndex=13, Parent=tpCard})
+    
+    -- XYZ field + Go button
     local xyzRow = new("Frame",{BackgroundTransparency=1, Size=UDim2.new(1,0,0,28), ZIndex=13, Parent=tpCard}) hlist(xyzRow,6)
     local xyzBox=new("TextBox",{BackgroundColor3=T.bg, Size=UDim2.new(1,-60,0,28), Font=FONT, Text="", PlaceholderText="X, Y, Z", PlaceholderColor3=T.dim, TextSize=11, TextColor3=T.text, ClearTextOnFocus=false, ZIndex=14, Parent=xyzRow}) corner(xyzBox,8) stroke(xyzBox,T.border,1) pad(xyzBox,0,0,8,8)
     local goBtn=new("TextButton",{BackgroundColor3=T.accent, Size=UDim2.new(0,56,0,28), Text="Go", Font=FONTB, TextSize=11, TextColor3=T.text, AutoButtonColor=false, ZIndex=14, Parent=xyzRow}) corner(goBtn,8)
@@ -1424,120 +1569,380 @@ do
         pcall(function() if alive() and Char.root then Char.root.CFrame=cf end end)
         pushToast("Teleported","warn",1)
     end)
-    -- Import row (folders + game support, import data shows up)
+    
+    -- Import row
     local importRow=new("Frame",{BackgroundTransparency=1, Size=UDim2.new(1,0,0,28), ZIndex=13, Parent=tpCard}) hlist(importRow,6)
-    local importBox=new("TextBox",{BackgroundColor3=T.bg, Size=UDim2.new(1,-60,0,28), Font=FONT, Text="", PlaceholderText="Import JSON", PlaceholderColor3=T.dim, TextSize=10, TextColor3=T.text, ClearTextOnFocus=false, ZIndex=14, Parent=importRow}) corner(importBox,8) stroke(importBox,T.border,1) pad(importBox,0,0,8,8)
-    local importBtn=new("TextButton",{BackgroundColor3=T.panel, Size=UDim2.new(0,56,0,28), Text="Import", Font=FONT, TextSize=11, TextColor3=T.text, AutoButtonColor=false, ZIndex=14, Parent=importRow}) corner(importBtn,8) stroke(importBtn,T.border,1)
+    local importBox=new("TextBox",{BackgroundColor3=T.bg, Size=UDim2.new(1,-70,0,28), Font=FONT, Text="", PlaceholderText="Import JSON", PlaceholderColor3=T.dim, TextSize=10, TextColor3=T.text, ClearTextOnFocus=false, ZIndex=14, Parent=importRow}) corner(importBox,8) stroke(importBox,T.border,1) pad(importBox,0,0,8,8)
+    local importBtn=new("TextButton",{BackgroundColor3=T.panel, Size=UDim2.new(0,66,0,28), Text="Import", Font=FONT, TextSize=11, TextColor3=T.text, AutoButtonColor=false, ZIndex=14, Parent=importRow}) corner(importBtn,8) stroke(importBtn,T.border,1)
     importBtn.Activated:Connect(function()
         local txt=importBox.Text
         if txt=="" then pushToast("Paste JSON","warn",1) return end
         local ok,data=pcall(HttpService.JSONDecode, HttpService, txt)
         if ok and type(data)=="table" then
-            local bank=getBank()
+            local state=getBank()
+            local validFolderIds = {}
+            for _,f in ipairs(state.folders) do validFolderIds[f.id]=true end
             for _,entry in ipairs(data) do
                 if entry.name and entry.px then
-                    local folder = entry.folder or selectedFolder
-                    bank[#bank+1]={name=entry.name, folder=folder, cframe=entry}
+                    local folderId = (entry.folderId and validFolderIds[entry.folderId]) and entry.folderId or nil
+                    table.insert(state.positions, {
+                        id = entry.id or HttpService:GenerateGUID(false),
+                        name = entry.name,
+                        px = entry.px or 0, py = entry.py or 0, pz = entry.pz or 0,
+                        lx = entry.lx or 0, ly = entry.ly or 0, lz = entry.lz or 1,
+                        folderId = folderId,
+                        createdAt = entry.createdAt or os.time(),
+                        updatedAt = os.time()
+                    })
                 end
             end
-            saveBank(bank)
+            saveBank(state)
             pushToast("Imported "..#data.." positions","warn",1)
-            pcall(refreshGrid)
+            pcall(refreshTree)
         else pushToast("Invalid JSON","warn",1) end
     end)
-    local gridHolder = new("ScrollingFrame",{BackgroundTransparency=1, Size=UDim2.new(1,0,0,126), BorderSizePixel=0, ScrollBarThickness=4, ScrollBarImageColor3=T.border, CanvasSize=UDim2.new(0,0,0,0), AutomaticCanvasSize=Enum.AutomaticSize.Y, ScrollingDirection=Enum.ScrollingDirection.Y, ZIndex=13, Parent=tpCard})
-    local gridLayout = new("UIGridLayout",{CellSize=UDim2.fromOffset(120,28), CellPadding=UDim2.fromOffset(6,6), FillDirectionMaxCells=2, SortOrder=Enum.SortOrder.LayoutOrder, Parent=gridHolder})
-    local function refreshGrid()
-        for _,c in ipairs(gridHolder:GetChildren()) do if c:IsA("GuiObject") and c.Name~=gridLayout.Name then c:Destroy() end end
-        if not gridHolder:FindFirstChildOfClass("UIGridLayout") then gridLayout.Parent=gridHolder end
-        local bank=getBank()
-        local filter=""; pcall(function() if filterBox then filter=(filterBox.Text or ""):lower():gsub("^%s+",""):gsub("%s+$","") end end)
-        local filtered={}
-        for i,e in ipairs(bank) do
-            local hay=(e.name or ""):lower().." "..(e.folder or ""):lower()
-            local folderMatch = not selectedFolder or selectedFolder=="" or ((e.folder or "Folder1"):lower() == selectedFolder:lower())
-            if folderMatch and (filter=="" or hay:find(filter,1,true)) then table.insert(filtered,{idx=i, entry=e}) end
+    
+    -- Tree container
+    local treeHolder = new("ScrollingFrame",{BackgroundTransparency=1, Size=UDim2.new(1,0,0,180), BorderSizePixel=0, ScrollBarThickness=4, ScrollBarImageColor3=T.border, CanvasSize=UDim2.new(0,0,0,0), AutomaticCanvasSize=Enum.AutomaticSize.Y, ScrollingDirection=Enum.ScrollingDirection.Y, ZIndex=13, Parent=tpCard})
+    local treeLayout = new("UIListLayout",{SortOrder=Enum.SortOrder.LayoutOrder, Padding=UDim2.fromOffset(0,4), Parent=treeHolder})
+    
+    -- Helper functions
+    local function toggleFolder(folderId)
+        expandedFolders[folderId] = not expandedFolders[folderId]
+        pcall(refreshTree)
+    end
+    
+    local function movePositionToFolder(positionId, folderId)
+        local state=getBank()
+        for _,pos in ipairs(state.positions) do
+            if pos.id == positionId then
+                pos.folderId = folderId
+                pos.updatedAt = os.time()
+                break
+            end
         end
-        for _,it in ipairs(filtered) do
-            local idx,entry=it.idx,it.entry
-            local card2=new("Frame",{BackgroundColor3=T.bg, Size=UDim2.fromOffset(120,28), LayoutOrder=idx, ZIndex=14, Parent=gridHolder}) corner(card2,8) stroke(card2,T.border,1) pad(card2,0,0,6,6)
-            local titleTxt=(entry.folder and entry.folder~="" and "? "..entry.folder or (entry.name or ("TP_"..idx)))
-            new("TextLabel",{BackgroundTransparency=1, Size=UDim2.new(1,-8,0,14), Position=offset(8,4), Font=FONTB, Text=titleTxt, TextSize=11, TextColor3=T.text, TextXAlignment=Enum.TextXAlignment.Left, TextTruncate=Enum.TextTruncate.AtEnd, ZIndex=15, Parent=card2})
-            new("TextLabel",{BackgroundTransparency=1, Size=UDim2.new(1,-8,0,10), Position=offset(8,18), Font=FONT, Text=string.format("%.0f, %.0f, %.0f", entry.px or 0, entry.py or 0, entry.pz or 0), TextSize=9, TextColor3=T.dim, TextXAlignment=Enum.TextXAlignment.Left, ZIndex=15, Parent=card2})
-            local lastClick=0
-            card2.InputBegan:Connect(function(inp)
-                if inp.UserInputType==Enum.UserInputType.MouseButton1 then
-                    local now=tick()
-                    if now - lastClick < 0.35 then
-                        if alive() then local cf=deserialize(entry) Char.root.CFrame=cf pushToast("Teleported to "..(entry.name or idx),"warn",1.2) end
-                    else
-                        pcall(function() xyzBox.Text=string.format("%.1f, %.1f, %.1f", entry.px or 0, entry.py or 0, entry.pz or 0) end)
-                        for _,c in ipairs(gridHolder:GetChildren()) do if c:IsA("Frame") then c.BackgroundColor3=T.bg end end
-                        card2.BackgroundColor3=T.panel2
-                    end
-                    lastClick=now
+        saveBank(state)
+        pcall(refreshTree)
+    end
+    
+    local function deletePosition(positionId)
+        local state=getBank()
+        for i,pos in ipairs(state.positions) do
+            if pos.id == positionId then
+                table.remove(state.positions, i)
+                break
+            end
+        end
+        saveBank(state)
+        pushToast("Deleted position","warn",1.2)
+        pcall(refreshTree)
+    end
+    
+    local function createFolder(name)
+        local state=getBank()
+        table.insert(state.folders, {
+            id = HttpService:GenerateGUID(false),
+            name = name or "New Folder",
+            parentId = nil,
+            expanded = false,
+            createdAt = os.time()
+        })
+        saveBank(state)
+        pcall(refreshTree)
+    end
+    
+    local function deleteFolder(folderId, moveContents)
+        local state=getBank()
+        -- Remove folder
+        for i,folder in ipairs(state.folders) do
+            if folder.id == folderId then
+                table.remove(state.folders, i)
+                break
+            end
+        end
+        -- Handle contents
+        if moveContents then
+            for _,pos in ipairs(state.positions) do
+                if pos.folderId == folderId then
+                    pos.folderId = nil
+                    pos.updatedAt = os.time()
                 end
-            end)
-            local tpBtn=new("TextButton",{BackgroundColor3=T.accent, Size=offset(34,18), Position=UDim2.new(1,-38,0,8), Text="Go", Font=FONTB, TextSize=10, TextColor3=T.text, AutoButtonColor=false, ZIndex=16, Parent=card2}) corner(tpBtn,6)
-            tpBtn.Activated:Connect(function() if not alive() then pushToast("No character","warn") return end local cf=deserialize(entry) Char.root.CFrame=cf pushToast("Teleported to "..(entry.name or idx),"warn",1.6) EVENTS.fire("tpbank:teleport", entry.name) end)
-            local delBtn=new("TextButton",{BackgroundColor3=T.panel, Size=offset(22,18), Position=UDim2.new(1,-64,0,8), Text="|", Font=FONTB, TextSize=12, TextColor3=T.dim, AutoButtonColor=false, ZIndex=16, Parent=card2}) corner(delBtn,6) stroke(delBtn,T.border,1)
-            delBtn.Activated:Connect(function() local b=getBank() table.remove(b,idx) saveBank(b) refreshGrid() pushToast("Deleted "..(entry.name or idx),"warn",1.2) end)
-            card2.InputBegan:Connect(function(inp) if inp.UserInputType==Enum.UserInputType.MouseButton2 then
-                local pg,box,saveBtn,cancelBtn,folderBox=ensurePrompt() box.Text=entry.name or "" folderBox.Text=entry.folder or "" pg.Visible=true box:CaptureFocus()
-                if promptSaveConn then promptSaveConn:Disconnect() end
-                if promptCancelConn then promptCancelConn:Disconnect() end
-                promptSaveConn=saveBtn.Activated:Connect(function()
-                    local newName=box.Text:gsub("^%s+",""):gsub("%s+$","") if newName~="" then entry.name=newName end
-                    local newFolder=folderBox.Text:gsub("^%s+",""):gsub("%s+$","")
-                    local depth = newFolder=="" and 0 or select(2, newFolder:gsub("/", "")) + 1
-                    if depth > 5 then pushToast("Max 5 folder depth","warn",1.2) return end
-                    entry.folder=newFolder
-                    saveBank(b) refreshGrid() pg.Visible=false promptSaveConn:Disconnect() if promptCancelConn then promptCancelConn:Disconnect() end
-                end)
-                promptCancelConn=cancelBtn.Activated:Connect(function() pg.Visible=false promptSaveConn:Disconnect() promptCancelConn:Disconnect() end)
-            end end)
-            card2.MouseEnter:Connect(function() card2.BackgroundColor3=T.panel end)
-            card2.MouseLeave:Connect(function() card2.BackgroundColor3=T.bg end)
+            end
+        else
+            -- Delete contents
+            for i=#state.positions,1,-1 do
+                if state.positions[i].folderId == folderId then
+                    table.remove(state.positions, i)
+                end
+            end
         end
-        if #filtered==0 and #getBank()>0 then
-            new("TextLabel",{BackgroundTransparency=1, Size=UDim2.new(1,0,0,24), Font=FONT, Text="No matches | clear filter", TextSize=11, TextColor3=T.dim, TextXAlignment=Enum.TextXAlignment.Center, LayoutOrder=99, ZIndex=14, Parent=tpCard})
-        elseif #getBank()==0 then
-            new("TextLabel",{BackgroundTransparency=1, Size=UDim2.new(1,0,0,24), Font=FONT, Text="No saves | Save Current Position", TextSize=11, TextColor3=T.dim, TextXAlignment=Enum.TextXAlignment.Center, LayoutOrder=99, ZIndex=14, Parent=tpCard})
+        saveBank(state)
+        pcall(refreshTree)
+    end
+    
+    local function exportBank()
+        local state=getBank()
+        local exportData = {
+            version = 1,
+            exportedAt = os.time(),
+            folders = state.folders,
+            positions = state.positions
+        }
+        local ok,json = pcall(HttpService.JSONEncode, HttpService, exportData)
+        if ok then
+            -- Copy to clipboard via setclipboard or show in textbox
+            if setclipboard then
+                setclipboard(json)
+                pushToast("Exported to clipboard","warn",1.5)
+            else
+                importBox.Text = json
+                pushToast("Export JSON shown in import box","warn",2)
+            end
+        else
+            pushToast("Export failed","warn",1)
         end
     end
-    pcall(function() if filterBox then filterBox:GetPropertyChangedSignal("Text"):Connect(refreshGrid) end end)
-    local saveBtn=new("TextButton",{BackgroundColor3=T.accent, Size=UDim2.new(1,0,0,28), Text="Save Current Position", Font=FONTB, TextSize=12, TextColor3=T.text, AutoButtonColor=false, ZIndex=14, Parent=tpCard}) corner(saveBtn,8) stroke(saveBtn,T.border,1)
-    saveBtn.Activated:Connect(function()
-        if not alive() then pushToast("No character","warn") return end
-        local bank=getBank() if #bank>=12 then pushToast("TP Bank full (12 max)","warn") return end
-        local pg,box,saveBtn2,cancelBtn,folderBox=ensurePrompt()
-        box.Text="TP_"..(#bank+1)
-        box.PlaceholderText="TP_"..(#bank+1)
-        folderBox.Text=""
-        folderBox.PlaceholderText="Folder (optional)"
-        pg.Visible=true box:CaptureFocus()
-        if promptSaveConn then promptSaveConn:Disconnect() end
-        if promptCancelConn then promptCancelConn:Disconnect() end
-        if promptEnterConn then promptEnterConn:Disconnect() end
-        promptSaveConn=saveBtn2.Activated:Connect(function()
-            local name=box.Text:gsub("^%s+",""):gsub("%s+$","") if name=="" then name="TP_"..(#bank+1) end
-            for _,e in ipairs(bank) do if e.name==name then pushToast("Name exists","warn") return end end
-            local folder=folderBox.Text:gsub("^%s+",""):gsub("%s+$","")
-            local cf=Char.root.CFrame
-            local d=serialize(cf) d.name=name d.folder=folder
-            table.insert(bank,d) saveBank(bank) refreshGrid() pg.Visible=false promptSaveConn:Disconnect() if promptCancelConn then promptCancelConn:Disconnect() end if promptEnterConn then promptEnterConn:Disconnect() end pushToast("Saved "..name..(folder~="" and " ["..folder.."]" or ""),"warn",1.4)
-        end)
-        promptCancelConn=cancelBtn.Activated:Connect(function() pg.Visible=false promptSaveConn:Disconnect() promptCancelConn:Disconnect() if promptEnterConn then promptEnterConn:Disconnect() end end)
-        promptEnterConn=box.FocusLost:Connect(function(enter) if enter then saveBtn2:Activate() end end)
+    
+    -- Render tree
+    local function refreshTree()
+        for _,c in ipairs(treeHolder:GetChildren()) do 
+            if c:IsA("GuiObject") and c.Name~=treeLayout.Name then c:Destroy() end 
+        end
+        
+        local state=getBank()
+        local rootPositions = {}
+        local folderPositions = {}
+        
+        -- Separate positions by folder
+        for _,pos in ipairs(state.positions) do
+            if pos.folderId then
+                folderPositions[pos.folderId] = folderPositions[pos.folderId] or {}
+                table.insert(folderPositions[pos.folderId], pos)
+            else
+                table.insert(rootPositions, pos)
+            end
+        end
+        
+        local order = 0
+        
+        -- Root positions section
+        if #rootPositions > 0 or #state.folders > 0 then
+            local rootHeader = new("Frame",{BackgroundTransparency=1, Size=UDim2.new(1,0,0,24), ZIndex=14, Parent=treeHolder})
+            rootHeader.LayoutOrder = order
+            order = order + 1
+            new("TextLabel",{BackgroundTransparency=1, Size=UDim2.new(1,-40,0,20), Position=offset(8,2), Font=FONTB, Text="⠿ Root positions", TextSize=11, TextColor3=T.text, TextXAlignment=Enum.TextXAlignment.Left, ZIndex=15, Parent=rootHeader})
+            local addBtn = new("TextButton",{BackgroundColor3=T.panel, Size=offset(32,20), Position=UDim2.new(1,-36,0,2), Text="+", Font=FONTB, TextSize=14, TextColor3=T.accent, AutoButtonColor=false, ZIndex=15, Parent=rootHeader}) corner(addBtn,6)
+            addBtn.Activated:Connect(function()
+                local pg,box,saveBtn,cancelBtn,folderBox=ensurePrompt()
+                box.Text="" box.PlaceholderText="New checkpoint"
+                folderBox.Text="" folderBox.PlaceholderText="Leave empty for root"
+                pg.Visible=true box:CaptureFocus()
+                if promptSaveConn then promptSaveConn:Disconnect() end
+                promptSaveConn=saveBtn.Activated:Connect(function()
+                    local name=box.Text:gsub("^%s+",""):gsub("%s+$","")
+                    if name=="" then name="Checkpoint_"..(#state.positions+1) end
+                    local cf=Char.root.CFrame
+                    local d=serialize(cf)
+                    table.insert(state.positions, {
+                        id = HttpService:GenerateGUID(false),
+                        name=name,
+                        px=d.px, py=d.py, pz=d.pz,
+                        lx=d.lx, ly=d.ly, lz=d.lz,
+                        folderId=nil,
+                        createdAt=os.time(),
+                        updatedAt=os.time()
+                    })
+                    saveBank(state)
+                    pg.Visible=false
+                    promptSaveConn:Disconnect()
+                    pushToast("Saved "..name,"warn",1.4)
+                    pcall(refreshTree)
+                end)
+            end)
+        end
+        
+        -- Render root positions
+        for _,pos in ipairs(rootPositions) do
+            order = order + 1
+            local card = new("Frame",{BackgroundColor3=T.bg, Size=UDim2.new(1,0,0,42), ZIndex=14, Parent=treeHolder})
+            card.LayoutOrder = order
+            corner(card,8) stroke(card,T.border,1) pad(card,8,8,6,6)
+            
+            new("TextLabel",{BackgroundTransparency=1, Size=UDim2.new(1,-100,0,16), Position=offset(0,2), Font=FONTB, Text="⠿  "..pos.name, TextSize=11, TextColor3=T.text, TextXAlignment=Enum.TextXAlignment.Left, ZIndex=15, Parent=card})
+            new("TextLabel",{BackgroundTransparency=1, Size=UDim2.new(1,-100,0,14), Position=offset(0,18), Font=FONT, Text=string.format("X %.2f · Y %.2f · Z %.2f", pos.px, pos.py, pos.pz), TextSize=9, TextColor3=T.dim, TextXAlignment=Enum.TextXAlignment.Left, ZIndex=15, Parent=card})
+            
+            local goBtn2 = new("TextButton",{BackgroundColor3=T.accent, Size=offset(42,22), Position=UDim2.new(1,-48,0,10), Text="Go", Font=FONTB, TextSize=10, TextColor3=T.text, AutoButtonColor=false, ZIndex=16, Parent=card}) corner(goBtn2,6)
+            goBtn2.Activated:Connect(function()
+                if not alive() then pushToast("No character","warn") return end
+                local cf=deserialize(pos)
+                Char.root.CFrame=cf
+                pushToast("Teleported to "..pos.name,"warn",1.6)
+            end)
+            
+            local menuBtn = new("TextButton",{BackgroundColor3=T.panel, Size=offset(28,22), Position=UDim2.new(1,-78,0,10), Text="⋮", Font=FONTB, TextSize=14, TextColor3=T.dim, AutoButtonColor=false, ZIndex=16, Parent=card}) corner(menuBtn,6)
+            menuBtn.Activated:Connect(function()
+                -- Context menu for position: rename, delete, move to folder
+                local action = nil
+                local newName = InputBox("Rename position (or type DELETE to remove)", pos.name)
+                if newName and newName ~= "" then
+                    if newName:upper() == "DELETE" then
+                        deletePosition(pos.id)
+                    else
+                        pos.name = newName
+                        pos.updatedAt = os.time()
+                        saveBank(state)
+                        pcall(refreshTree)
+                        pushToast("Renamed position","warn",1)
+                    end
+                end
+            end)
+            
+            -- Drag handle
+            local dragHandle = new("TextButton",{BackgroundTransparency=1, Size=offset(20,20), Position=offset(4,11), Text="⠿", Font=FONT, TextSize=16, TextColor3=T.dim, AutoButtonColor=false, ZIndex=17, Parent=card})
+            dragHandle.Activated:Connect(function()
+                draggedItem = {type="position", id=pos.id}
+                pushToast("Drag to a folder or root","warn",1)
+            end)
+            
+            card.MouseEnter:Connect(function() card.BackgroundColor3=T.panel end)
+            card.MouseLeave:Connect(function() card.BackgroundColor3=T.bg end)
+        end
+        
+        -- Render folders
+        for _,folder in ipairs(state.folders) do
+            order = order + 1
+            local isExpanded = expandedFolders[folder.id]
+            local folderCard = new("Frame",{BackgroundTransparency=1, Size=UDim2.new(1,0,0,28), ZIndex=14, Parent=treeHolder})
+            folderCard.LayoutOrder = order
+            pad(folderCard,8,8,4,4)
+            
+            local chevron = isExpanded and "▾" or "▸"
+            local folderBtn = new("TextButton",{BackgroundTransparency=1, Size=UDim2.new(1,-40,0,24), Text=chevron.."  📁 "..folder.name, Font=FONTB, TextSize=11, TextColor3=T.text, TextXAlignment=Enum.TextXAlignment.Left, AutoButtonColor=false, ZIndex=15, Parent=folderCard})
+            folderBtn.Activated:Connect(function() toggleFolder(folder.id) end)
+            
+            local delBtn = new("TextButton",{BackgroundColor3=T.panel, Size=offset(32,22), Position=UDim2.new(1,-36,0,1), Text="⋮", Font=FONTB, TextSize=12, TextColor3=T.dim, AutoButtonColor=false, ZIndex=15, Parent=folderCard}) corner(delBtn,6)
+            delBtn.Activated:Connect(function()
+                -- Delete folder with option dialog
+                local choice = nil
+                -- Simple inline prompt: rename or delete
+                local newName = InputBox("Rename folder or type DELETE to remove", folder.name)
+                if newName and newName ~= "" then
+                    if newName:upper() == "DELETE" then
+                        deleteFolder(folder.id, true) -- move contents to root
+                        pushToast("Deleted folder","warn",1.2)
+                    else
+                        folder.name = newName
+                        saveBank(state)
+                        pcall(refreshTree)
+                        pushToast("Renamed folder","warn",1)
+                    end
+                end
+            end)
+            
+            -- Render folder contents if expanded
+            if isExpanded then
+                local fPositions = folderPositions[folder.id] or {}
+                for _,pos in ipairs(fPositions) do
+                    order = order + 1
+                    local posCard = new("Frame",{BackgroundColor3=T.bg, Size=UDim2.new(1,0,0,38), ZIndex=14, Parent=treeHolder})
+                    posCard.LayoutOrder = order
+                    corner(posCard,8) stroke(posCard,T.border,1) pad(posCard,12,12,4,4)
+                    
+                    new("TextLabel",{BackgroundTransparency=1, Size=UDim2.new(1,-100,0,14), Position=offset(0,2), Font=FONTB, Text="⠿  "..pos.name, TextSize=10, TextColor3=T.text, TextXAlignment=Enum.TextXAlignment.Left, ZIndex=15, Parent=posCard})
+                    new("TextLabel",{BackgroundTransparency=1, Size=UDim2.new(1,-100,0,12), Position=offset(0,16), Font=FONT, Text=string.format("X %.2f · Y %.2f · Z %.2f", pos.px, pos.py, pos.pz), TextSize=8, TextColor3=T.dim, TextXAlignment=Enum.TextXAlignment.Left, ZIndex=15, Parent=posCard})
+                    
+                    local goBtn3 = new("TextButton",{BackgroundColor3=T.accent, Size=offset(36,18), Position=UDim2.new(1,-42,0,10), Text="Go", Font=FONTB, TextSize=9, TextColor3=T.text, AutoButtonColor=false, ZIndex=16, Parent=posCard}) corner(goBtn3,6)
+                    goBtn3.Activated:Connect(function()
+                        if not alive() then pushToast("No character","warn") return end
+                        local cf=deserialize(pos)
+                        Char.root.CFrame=cf
+                        pushToast("Teleported","warn",1.6)
+                    end)
+                    
+                    local menuBtn2 = new("TextButton",{BackgroundTransparency=1, Size=offset(24,18), Position=UDim2.new(1,-80,0,10), Text="⋮", Font=FONTB, TextSize=11, TextColor3=T.dim, AutoButtonColor=false, ZIndex=16, Parent=posCard})
+                    menuBtn2.Activated:Connect(function()
+                        -- Context menu for folder position: rename, delete, move to root/another folder
+                        local newName = InputBox("Rename position (or type DELETE to remove)", pos.name)
+                        if newName and newName ~= "" then
+                            if newName:upper() == "DELETE" then
+                                deletePosition(pos.id)
+                            else
+                                pos.name = newName
+                                pos.updatedAt = os.time()
+                                saveBank(state)
+                                pcall(refreshTree)
+                                pushToast("Renamed position","warn",1)
+                            end
+                        end
+                    end)
+                    
+                    posCard.MouseEnter:Connect(function() posCard.BackgroundColor3=T.panel end)
+                    posCard.MouseLeave:Connect(function() posCard.BackgroundColor3=T.bg end)
+                end
+                
+                if #fPositions == 0 then
+                    order = order + 1
+                    new("TextLabel",{BackgroundTransparency=1, Size=UDim2.new(1,0,0,18), Font=FONT, Text="  Folder is empty", TextSize=9, TextColor3=T.dim, TextXAlignment=Enum.TextXAlignment.Left, ZIndex=15, Parent=treeHolder})
+                end
+            end
+        end
+        
+        -- Empty state
+        if #state.positions == 0 and #state.folders == 0 then
+            new("TextLabel",{BackgroundTransparency=1, Size=UDim2.new(1,0,0,32), Font=FONT, Text="No saved positions yet.\nSave your current coordinates to create your first position.", TextSize=10, TextColor3=T.dim, TextWrapped=true, TextXAlignment=Enum.TextXAlignment.Center, ZIndex=14, Parent=treeHolder})
+        end
+        
+        -- Update count
+        local countLabel = tpCard:FindFirstChild("CountLabel")
+        if not countLabel then
+            countLabel = new("TextLabel",{BackgroundTransparency=1, Size=UDim2.new(1,0,0,14), Font=FONT, Text="", TextSize=9, TextColor3=T.dim, TextXAlignment=Enum.TextXAlignment.Right, ZIndex=13, Parent=tpCard})
+            countLabel.Name = "CountLabel"
+        end
+        countLabel.Text = #state.positions.." / 12 used"
+    end
+    
+    -- Create folder button
+    local createFolderRow = new("Frame",{BackgroundTransparency=1, Size=UDim2.new(1,0,0,28), ZIndex=13, Parent=tpCard}) hlist(createFolderRow,6)
+    local createFolderBtn = new("TextButton",{BackgroundColor3=T.panel, Size=UDim2.new(1,0,0,28), Text="+ Create folder", Font=FONTB, TextSize=11, TextColor3=T.text, AutoButtonColor=false, ZIndex=14, Parent=createFolderRow}) corner(createFolderBtn,8) stroke(createFolderBtn,T.border,1)
+    createFolderBtn.Activated:Connect(function()
+        local state=getBank()
+        createFolder("New Folder")
     end)
+    
+    -- Export button (compact, in header area)
+    local exportRow = new("Frame",{BackgroundTransparency=1, Size=UDim2.new(1,0,0,24), ZIndex=13, Parent=tpCard}) 
+    local exportBtn = new("TextButton",{BackgroundColor3=T.panel, Size=offset(70,24), Text="Export", Font=FONT, TextSize=10, TextColor3=T.text, AutoButtonColor=false, ZIndex=14, Parent=exportRow}) corner(exportBtn,6) stroke(exportBtn,T.border,1)
+    exportBtn.Activated:Connect(function() exportBank() end)
+    
+    -- Reset button
+    local resetBtn = new("TextButton",{BackgroundColor3=T.panel, Size=offset(70,24), Position=UDim2.new(1,-76,0,0), Text="Reset", Font=FONT, TextSize=10, TextColor3=T.dim, AutoButtonColor=false, ZIndex=14, Parent=exportRow}) corner(resetBtn,6) stroke(resetBtn,T.border,1)
+    resetBtn.Activated:Connect(function()
+        TPBankState = {positions={}, folders={}}
+        saveBank(TPBankState)
+        pushToast("TP Bank reset","warn",1.2)
+        pcall(refreshTree)
+    end)
+    
     -- initial draw
-    refreshGrid()
+    refreshTree()
     -- expose canonical + bridge (single source of truth: AssistantContext.tpBank)
     _G.AssistantContext=_G.AssistantContext or {} _G.AssistantContext.tpBank=getBank()
     _G.TPBank = {get=getBank, save=saveBank, refresh=refreshGrid, deserialize=deserialize, serialize=serialize, _bank=getBank()}
     EVENTS.on("tpbank:teleport", function(name) Verity:Set("happy") task.delay(0.8,function() Verity:Set("neutral") end) end)
 end
 -- Settings ? Appearance (Pass 3 Hub Themes, Hub-only) | single authoritative content lifecycle
+-- Stable action IDs for button mapping (not positional assumptions)
+local AppearanceActions = {
+    SelectPreset = "appearance.preset.select",
+    CustomizePreset = "appearance.preset.customize",
+    PickAccent = "appearance.accent.pick",
+    ResetChanges = "appearance.reset.changes",
+    SavePreset = "appearance.preset.save",
+    SaveAsPreset = "appearance.preset.saveas",
+    ToggleFullscreen = "appearance.fullscreen.toggle",
+    LockPosition = "appearance.position.lock",
+}
+
 do
     local AppearanceGeneration = 0
     local appCard = makeCard("Settings", "Appearance", nil)
@@ -1553,7 +1958,7 @@ do
         return new("TextLabel",{BackgroundTransparency=1, Size=UDim2.new(1,0,0,12), Font=FONT, Text=text, TextSize=9, TextColor3=T.dim, TextXAlignment=Enum.TextXAlignment.Left, ZIndex=13, Parent=appCard})
     end
 
-    -- live current-state summary
+    -- live current-state summary with preset-based info
     local sizeNames={["0.85"]="Small",["1.00"]="Normal",["1.15"]="Large",["1.30"]="XL"}
     local function scaleToName() return sizeNames[tostring(hubAppearance.Scale)] or "Normal" end
     local summaryLabel = new("TextLabel",{BackgroundTransparency=1, Size=UDim2.new(1,0,0,18), Font=FONT, TextSize=10, TextColor3=T.dim, TextXAlignment=Enum.TextXAlignment.Left, TextWrapped=true, AutomaticSize=Enum.AutomaticSize.Y, ZIndex=13, Parent=appCard})
@@ -1561,14 +1966,17 @@ do
         local th = THEMES[hubAppearance.Theme] or THEMES.Theme_01
         local pos = hubAppearance.Position or "Default"
         local trans = hubAppearance.Transparency or 0
-        summaryLabel.Text = string.format("%s | %s | %s | %d%% | %s", th.name, scaleToName(), pos, trans, HubState.Mode)
+        local modified = isAppearanceDirty(hubAppearance) and " *" or ""
+        summaryLabel.Text = string.format("%s%s | %s | %s | %d%% | %s", th.name, modified, scaleToName(), pos, trans, HubState.Mode)
     end
 
-    -- ===== PREVIEW (persistent, deterministic) =====
+    -- ===== PREVIEW (persistent, deterministic, interactive) =====
     local previewFrame
     local function RefreshAppearancePreview()
         if not previewFrame then return end
-        local th = THEMES[hubAppearance.Theme] or THEMES.Theme_01
+        -- Use ResolveAppearance for consistent state
+        local resolved = ResolveAppearance()
+        local th = THEMES[resolved.Theme] or THEMES.Theme_01
         local c = {}
         for k,v in pairs(th.colors) do c[k]=v end
         if hubAppearance.Theme=="Theme_07" and hubAppearance.CustomColors then
@@ -1825,7 +2233,8 @@ do
         local b=new("TextButton",{BackgroundColor3=(math.abs(hubAppearance.Scale-scale)<0.01) and T.accent or T.panel, Size=UDim2.new(0,64,0,28), Text=name, Font=FONT, TextSize=11, TextColor3=(math.abs(hubAppearance.Scale-scale)<0.01) and T.text or T.dim, AutoButtonColor=false, ZIndex=14, Parent=sizeRow}) corner(b,8) stroke(b,T.border,1)
         b.Activated:Connect(function()
             hubAppearance.Scale=scale
-            if hubScale then hubScale.Scale=scale end
+            -- Scale value now stored in hubAppearance but not applied via UIScale
+            -- Responsive sizing handles dimensions directly
             Settings:Set("hubAppearance", hubAppearance, "global"); Settings:Save("global")
             refreshSize(); refreshSummary(); RefreshAppearancePreview()
             pushToast("Size: "..name,"warn",1.2)
@@ -1963,12 +2372,28 @@ do
     new("TextLabel",{BackgroundTransparency=1, Size=UDim2.new(1,0,0,16), Font=FONT, Text="Restore the default appearance settings.", TextSize=10, TextColor3=T.dim, TextXAlignment=Enum.TextXAlignment.Left, ZIndex=13, Parent=appCard})
     local resetAppBtn = new("TextButton",{BackgroundColor3=T.panel, Size=UDim2.new(1,0,0,28), Text="Reset Appearance", Font=FONTB, TextSize=11, TextColor3=T.text, AutoButtonColor=false, ZIndex=14, Parent=appCard}) corner(resetAppBtn,8) stroke(resetAppBtn,T.border,1)
     resetAppBtn.MouseButton1Click:Connect(function()
-        hubAppearance = {Theme="Theme_01", CustomColors=nil, Scale=1.0, Position="Default", Transparency=0, PositionMode="Draggable", RememberPosition=true, BorderEnabled=true, BorderThickness=1, CornerRadius=10, ShadowsEnabled=true, GlowEnabled=false}
-        HubState.Mode="Draggable"
-        if hubScale then hubScale.Scale=1.0 end
-        if HubCanvasGroup then HubCanvasGroup.GroupTransparency=0 end
-        local vp=viewport(); local sw,sh=shell.AbsoluteSize.X, shell.AbsoluteSize.Y
-        shell.Position=offset(math.floor((vp.X-sw)/2), math.floor((vp.Y-sh)/2))
+        -- Reset to new preset-based structure
+        hubAppearance.PresetId = "Theme_01"
+        hubAppearance.BaseTheme = "Theme_01"
+        hubAppearance.Overrides = {}
+        hubAppearance.Theme = "Theme_01"
+        hubAppearance.CustomColors = nil
+        hubAppearance.Scale = 1.0
+        hubAppearance.Position = "Default"
+        hubAppearance.Transparency = 0
+        hubAppearance.PositionMode = "Draggable"
+        hubAppearance.RememberPosition = true
+        hubAppearance.BorderEnabled = true
+        hubAppearance.BorderThickness = 1
+        hubAppearance.CornerRadius = 10
+        hubAppearance.ShadowsEnabled = true
+        hubAppearance.GlowEnabled = false
+        
+        HubState.Mode = "Draggable"
+        -- hubScale removed; responsive sizing handles dimensions
+        if HubCanvasGroup then HubCanvasGroup.GroupTransparency = 0 end
+        local vp = viewport(); local sw,sh = shell.AbsoluteSize.X, shell.AbsoluteSize.Y
+        shell.Position = offset(math.floor((vp.X-sw)/2), math.floor((vp.Y-sh)/2))
         ThemeSystem.SetHubTheme("Theme_01", true)
         refreshThemeButtons(); refreshSize(); refreshPosition(); refreshSummary(); refreshMode(); RefreshAppearancePreview()
         transSlider.set(0)
@@ -2017,29 +2442,64 @@ do local card=makeCard("Deloader","Lifecycle","Hybrid X: click hide | hold 0.9s 
     verBtn.Activated:Connect(function() pcall(function() if Gui then Gui:Destroy() end if heartbeatConn then heartbeatConn:Disconnect() end end) pushToast("Verity unloaded","warn",1.2) end)
     local allBtn=new("TextButton",{BackgroundColor3=T.warn, Size=UDim2.new(1,0,0,28), Text="UNLOAD All", Font=FONTB, TextSize=12, TextColor3=Color3.new(1,1,1), AutoButtonColor=false, ZIndex=14, Parent=card}) corner(allBtn,8) allBtn.Activated:Connect(function() local fn=getgenv()[UNLOAD_KEY] if fn then pcall(fn) end end) 
 end
--- About tab (UI assets, credits, games, bugfixes)
+-- About tab (consolidated: identity, runtime, credits, games, contributions, diagnostics)
 do
-    local AboutData={Version="2.7.2", Build="2.7.2", SpecialThanks={"Fleece Utility","SchizHub v7","DarkHub","TokkuHub"}, FavoriteGames={{name="Ninja Legends", creator="Ninja Team"},{name="Phantom Forces", creator="Stylis"},{name="Arsenal"},{name="Jailbreak"},{name="BedWars"}}, Contributions={"Equilibrium team","Community testers"}, Inspiration={"SchizHub design","Fleece panel","Verity assistant"}}
-    local abCard=makeCard("About","Equilibrium — About","UI assets, credits, and build info")
-    new("TextLabel",{BackgroundTransparency=1, Size=UDim2.new(1,0,0,14), Font=FONTB, Text="Version "..AboutData.Version.." | RuntimeSignature Heartbeats="..tostring(runtimeSignature().HeartbeatsObserved or 3), TextSize=9, TextColor3=T.dim, TextXAlignment=Enum.TextXAlignment.Left, ZIndex=13, Parent=abCard})
-    -- rbxasset inserter with 6 presets + custom 070707
-    local assetTitle=new("TextLabel",{BackgroundTransparency=1, Size=UDim2.new(1,0,0,14), Font=FONTB, Text="Asset Inserter  rbxassetid://", TextSize=10, TextColor3=T.subtext, TextXAlignment=Enum.TextXAlignment.Left, ZIndex=13, Parent=abCard})
-    local previewImg=new("ImageLabel",{BackgroundColor3=T.bg, Size=UDim2.new(0,80,0,80), BorderSizePixel=0, Image="", ZIndex=13, Parent=abCard}) corner(previewImg,8) stroke(previewImg,T.border,1)
+    local AboutData={
+        Version="2.7.2",
+        Build="10K-RP",
+        SpecialThanks={"Verity team","Fleece Utility","SchizHub v7","Base_Rework","DarkHub","TokkuHub","Contributors"},
+        FavoriteGames={
+            {name="Ninja Legends", creator="Scriptbloxian Studios", placeId=3956818381, actionLabel="Open"},
+            {name="Phantom Forces", creator="StyLiS Studios", placeId=292439477, actionLabel="Open"},
+            {name="Arsenal", creator="ROLVe Community", placeId=286090429, actionLabel="Open"},
+            {name="Jailbreak", creator="Badimo", placeId=606849621, actionLabel="Open"},
+            {name="BedWars", creator="Easy.gg", placeId=8737899170, actionLabel="Open"},
+            {name="Adopt Me!", creator="DreamCraft", placeId=920587237, actionLabel="Open"},
+            {name="Universal", description="Teleport / teleport-tested reference", placeId=nil, actionLabel=nil},
+        },
+        Contributions={"Asset inserter","TP Bank","Appearance system","Heartbeat validation","Compact tabs","Sidebar"},
+        Inspiration={"Built from experimentation with utility hubs, modular UI, and lightweight runtime tooling."},
+    }
+    
+    local abCard=makeCard("About","Equilibrium — About","UI assets, credits, and build information")
+    
+    -- Helper to create compact info cards
+    local function makeInfoCard(parent, title, contentText, textSize)
+        textSize = textSize or 10
+        local titleLabel=new("TextLabel",{BackgroundTransparency=1, Size=UDim2.new(1,0,0,13), Font=FONTB, Text=title, TextSize=10, TextColor3=T.text, TextXAlignment=Enum.TextXAlignment.Left, ZIndex=13, Parent=parent})
+        local contentLabel=new("TextLabel",{BackgroundTransparency=1, Size=UDim2.new(1,0,0,0), AutomaticSize=Enum.AutomaticSize.Y, Font=FONT, Text=contentText, TextSize=textSize, TextColor3=T.dim, TextWrapped=true, ZIndex=13, Parent=parent})
+        return titleLabel, contentLabel
+    end
+    
+    -- Identity card
+    local sig=runtimeSignature()
+    local identityText=string.format("Version %s | Build %s | RuntimeSignature Heartbeats=%d", 
+        AboutData.Version, AboutData.Build, sig.HeartbeatsObserved or 3)
+    makeInfoCard(abCard, "Identity", identityText, 9)
+    
+    -- Asset Inserter (kept as functional section above/below About content)
+    local assetSeparator=new("Frame",{BackgroundColor3=T.border, BackgroundTransparency=0.5, Size=UDim2.new(1,0,0,1), ZIndex=12, Parent=abCard})
+    local assetTitle=new("TextLabel",{BackgroundTransparency=1, Size=UDim2.new(1,0,0,13), Font=FONTB, Text="Asset Inserter  rbxassetid://", TextSize=10, TextColor3=T.subtext, TextXAlignment=Enum.TextXAlignment.Left, ZIndex=13, Parent=abCard})
+    local previewRow=new("Frame",{BackgroundTransparency=1, Size=UDim2.new(1,0,0,32), ZIndex=13, Parent=abCard}) 
+    hlist(previewRow,8)
+    local previewImg=new("ImageLabel",{BackgroundColor3=T.bg, Size=UDim2.new(0,80,0,80), BorderSizePixel=0, Image="", ZIndex=13, Parent=previewRow}) corner(previewImg,8) stroke(previewImg,T.border,1)
+    local previewInfo=new("Frame",{BackgroundTransparency=1, Size=UDim2.new(1,0,0,80), ZIndex=13, Parent=previewRow})
+    
     local AssetPresetRegistry={
         {Name="Preset 1", Id="6031090997"}, {Name="Preset 2", Id="6031091000"}, {Name="Preset 3", Id="6031091002"},
         {Name="Preset 4", Id="6034427301"}, {Name="Preset 5", Id="6031090998"}, {Name="Preset 6", Id="70707070"},
     }
     local AssetInsertionState="Ready"
     local lastInsertionRecord=nil
-    local stateLabel=new("TextLabel",{BackgroundTransparency=1, Size=UDim2.new(1,0,0,12), Font=FONT, Text="State: Ready", TextSize=9, TextColor3=T.dim, TextXAlignment=Enum.TextXAlignment.Left, ZIndex=13, Parent=abCard})
+    local stateLabel=new("TextLabel",{BackgroundTransparency=1, Size=UDim2.new(1,0,0,12), Font=FONT, Text="State: Ready", TextSize=9, TextColor3=T.dim, TextXAlignment=Enum.TextXAlignment.Left, ZIndex=13, Parent=previewInfo})
     local function setInsertionState(s) AssetInsertionState=s stateLabel.Text="State: "..s end
     _G.AssetPresetRegistry=AssetPresetRegistry
     _G.AssetInsertionState=function() return AssetInsertionState end
     _G.LastInsertionRecord=function() return lastInsertionRecord end
-    local presetRow=new("Frame",{BackgroundTransparency=1, Size=UDim2.new(1,0,0,28), ZIndex=13, Parent=abCard}) hlist(presetRow,4)
+    
+    local presetRow=new("Frame",{BackgroundTransparency=1, Size=UDim2.new(1,0,0,28), ZIndex=13, Parent=previewInfo}) hlist(presetRow,4)
     for i, preset in ipairs(AssetPresetRegistry) do
         local pid=preset.Id
-        -- validation: full numeric 6-10 digits
         local valid = pid:match("^%d+$") and #pid>=6 and #pid<=10
         local b=new("TextButton",{BackgroundColor3=T.panel, Size=UDim2.fromOffset(46,28), Text="P"..i, Font=FONT, TextSize=10, TextColor3=valid and T.dim or T.warn, AutoButtonColor=false, ZIndex=14, Parent=presetRow}) corner(b,6) stroke(b,T.border,1)
         b.Activated:Connect(function()
@@ -2058,7 +2518,8 @@ do
             end
         end)
     end
-    local customRow=new("Frame",{BackgroundTransparency=1, Size=UDim2.new(1,0,0,28), ZIndex=13, Parent=abCard}) hlist(customRow,6)
+    
+    local customRow=new("Frame",{BackgroundTransparency=1, Size=UDim2.new(1,0,0,28), ZIndex=13, Parent=previewInfo}) hlist(customRow,6)
     local idBox=new("TextBox",{BackgroundColor3=T.bg, Size=UDim2.new(0,120,0,28), Font=FONT, Text="", PlaceholderText="070707", PlaceholderColor3=T.dim, TextSize=11, TextColor3=T.text, ClearTextOnFocus=false, ZIndex=14, Parent=customRow}) corner(idBox,6) stroke(idBox,T.border,1) pad(idBox,0,0,8,8)
     local insertBtn=new("TextButton",{BackgroundColor3=T.accent, Size=UDim2.new(0,80,0,28), Text="Insert ID", Font=FONTB, TextSize=11, TextColor3=T.text, AutoButtonColor=false, ZIndex=14, Parent=customRow}) corner(insertBtn,6)
     insertBtn.Activated:Connect(function()
@@ -2068,7 +2529,6 @@ do
         setInsertionState("Inserting")
         local ok, err = pcall(function() previewImg.Image="rbxassetid://"..id end)
         local target = previewImg:GetFullName()
-        -- distinguish environment unavailable vs pcall failed vs success
         if not pcall(function() return game:GetService("InsertService") end) then
             lastInsertionRecord={Preset="Custom", AssetId=id, PreviewTarget=target, Target=target, InsertParent="Unavailable", State="Unavailable", InsertedAt=os.clock()}
             setInsertionState("Unavailable")
@@ -2085,16 +2545,55 @@ do
             pushToast("Failed: "..tostring(err),"warn",1)
         end
     end)
-    new("TextLabel",{BackgroundTransparency=1, Size=UDim2.new(1,0,0,12), Font=FONT, Text="6 presets + custom 070707 — txt doc implementation later", TextSize=9, TextColor3=T.dim, TextXAlignment=Enum.TextXAlignment.Left, ZIndex=13, Parent=abCard})
-    -- Credits
-    new("TextLabel",{BackgroundTransparency=1, Size=UDim2.new(1,0,0,14), Font=FONTB, Text="Credits", TextSize=11, TextColor3=T.text, ZIndex=13, Parent=abCard})
-    new("TextLabel",{BackgroundTransparency=1, Size=UDim2.new(1,0,0,0), AutomaticSize=Enum.AutomaticSize.Y, Font=FONT, Text="Equilibrium by Verity team | Based on Fleece Utility, SchizHub v7 (Base_Rework), DarkHub, TokkuHub | Special thanks contributors", TextSize=10, TextColor3=T.dim, TextWrapped=true, ZIndex=13, Parent=abCard})
-    -- Games tested/supported
-    new("TextLabel",{BackgroundTransparency=1, Size=UDim2.new(1,0,0,14), Font=FONTB, Text="Games Tested / Supported", TextSize=11, TextColor3=T.text, ZIndex=13, Parent=abCard})
-    new("TextLabel",{BackgroundTransparency=1, Size=UDim2.new(1,0,0,0), AutomaticSize=Enum.AutomaticSize.Y, Font=FONT, Text="Ninja Legends, Phantom Forces, Arsenal, Jailbreak, BedWars, Adopt Me, Universal — teleport/teleport tested, movement/visuals universal", TextSize=10, TextColor3=T.dim, TextWrapped=true, ZIndex=13, Parent=abCard})
-    -- Bug fix for build
-    new("TextLabel",{BackgroundTransparency=1, Size=UDim2.new(1,0,0,14), Font=FONTB, Text="Build Fixes — 10K-R", TextSize=11, TextColor3=T.text, ZIndex=13, Parent=abCard})
-    new("TextLabel",{BackgroundTransparency=1, Size=UDim2.new(1,0,0,0), AutomaticSize=Enum.AutomaticSize.Y, Font=FONT, Text="• TipFrame outside AutomaticSize hierarchy • Hover presentation-only • Enabled/Value isolation • Clip check toggle • Window _, Square, x preserved • REGISTER-01 temp globals", TextSize=9, TextColor3=T.dim, TextWrapped=true, ZIndex=13, Parent=abCard})
+    new("TextLabel",{BackgroundTransparency=1, Size=UDim2.new(1,0,0,11), Font=FONT, Text="6 presets + custom — preview only", TextSize=9, TextColor3=T.dim, TextXAlignment=Enum.TextXAlignment.Left, ZIndex=13, Parent=previewInfo})
+    
+    -- Separator
+    local sep2=new("Frame",{BackgroundColor3=T.border, BackgroundTransparency=0.5, Size=UDim2.new(1,0,0,1), ZIndex=12, Parent=abCard})
+    
+    -- Special Thanks card
+    makeInfoCard(abCard, "Special Thanks", table.concat(AboutData.SpecialThanks, " • "), 10)
+    
+    -- Favorite Games card with interactive rows
+    local gamesTitle=new("TextLabel",{BackgroundTransparency=1, Size=UDim2.new(1,0,0,13), Font=FONTB, Text="Favorite Games", TextSize=10, TextColor3=T.text, TextXAlignment=Enum.TextXAlignment.Left, ZIndex=13, Parent=abCard})
+    local gamesContainer=new("Frame",{BackgroundTransparency=1, Size=UDim2.new(1,0,0,0), AutomaticSize=Enum.AutomaticSize.Y, ZIndex=13, Parent=abCard})
+    vlist(gamesContainer,4)
+    
+    local function getGameAction(gameInfo)
+        if not gameInfo.placeId then return "Unavailable" end
+        return gameInfo.actionLabel or "Open"
+    end
+    
+    for _, gameInfo in ipairs(AboutData.FavoriteGames) do
+        local row=new("Frame",{BackgroundColor3=T.panel, BackgroundTransparency=0.3, Size=UDim2.new(1,0,0,42), ZIndex=13, Parent=gamesContainer}) corner(row,8) stroke(row,T.border,1)
+        hlist(row,8)
+        
+        local nameLabel=new("TextLabel",{BackgroundTransparency=1, Size=UDim2.new(0.6,0,0,20), Font=FONTB, Text=gameInfo.name, TextSize=11, TextColor3=T.text, TextXAlignment=Enum.TextXAlignment.Left, ZIndex=14, Parent=row})
+        local descLabel=new("TextLabel",{BackgroundTransparency=1, Size=UDim2.new(0.6,0,0,14), Position=UDim2.new(0,0,0,20), Font=FONT, Text=gameInfo.creator or gameInfo.description or "", TextSize=9, TextColor3=T.dim, TextXAlignment=Enum.TextXAlignment.Left, ZIndex=14, Parent=row})
+        
+        local action = getGameAction(gameInfo)
+        if action == "Open" then
+            local actionBtn=new("TextButton",{BackgroundColor3=T.accent, Size=UDim2.new(0,70,0,28), Text="Open", Font=FONTB, TextSize=10, TextColor3=T.text, AutoButtonColor=false, ZIndex=14, Parent=row}) corner(actionBtn,6)
+            actionBtn.Activated:Connect(function()
+                if gameInfo.placeId then
+                    pushToast("Opening "..gameInfo.name.."...","warn",1)
+                    -- Teleport would be implemented here with proper ServerHop controller
+                    pcall(function() game:GetService("TeleportService"):Teleport(gameInfo.placeId) end)
+                end
+            end)
+        else
+            local statusLabel=new("TextLabel",{BackgroundColor3=T.bg, Size=UDim2.new(0,80,0,28), Text="[Reference only]", Font=FONT, TextSize=9, TextColor3=T.dim, ZIndex=14, Parent=row}) corner(statusLabel,6)
+        end
+    end
+    
+    -- Contributions card
+    makeInfoCard(abCard, "Contributions", table.concat(AboutData.Contributions, " • "), 10)
+    
+    -- Inspiration card
+    makeInfoCard(abCard, "Inspiration", AboutData.Inspiration[1], 9)
+    
+    -- Diagnostics / Build Info card
+    local diagText=string.format("Build %s | Qualification: 10K-RP | Register pressure monitored", AboutData.Build)
+    makeInfoCard(abCard, "Diagnostics", diagText, 9)
 end
 
 -- Hotkeys
