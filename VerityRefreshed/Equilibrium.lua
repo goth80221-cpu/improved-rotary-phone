@@ -139,22 +139,49 @@ _G.ThemeAuditAll = function() local out={} for _,id in ipairs(THEME_ORDER) do ou
 -- Verity identity palette | fixed black/gold, never themed by Hub (ThemeLocked authoritative)
 local VERITY_THEME = { bg=Color3.fromHex("070707"), panel=Color3.fromHex("141414"), border=Color3.fromRGB(201,168,106), text=Color3.fromHex("e6e6e6"), dim=Color3.fromHex("a0a0a8"), accent=Color3.fromRGB(201,168,106), on=Color3.fromHex("5fdc82"), off=Color3.fromHex("4b5563"), warn=Color3.fromHex("e81123") }
 -- Hub Appearance persisted (Settings global hubAppearance)
--- PositionMode: single state Draggable/Locked with migration from old Draggable/Locked booleans
-hubAppearance = {Theme="Theme_01", Scale=1.0, Position=nil, Transparency=0, PositionMode="Draggable", RememberPosition=true, BorderEnabled=true, BorderThickness=1, CornerRadius=10, ShadowsEnabled=true, GlowEnabled=false, TextScale=1.0, ClipEnabled=true}
+-- New preset-based architecture: BaseTheme + UserOverrides = ResolvedAppearance
+hubAppearance = {
+    PresetId = "Theme_01",
+    BaseTheme = "Theme_01",
+    Overrides = {},
+    -- Legacy compatibility fields (migrated on load)
+    Theme = "Theme_01",
+    Scale = 1.0,
+    Position = nil,
+    Transparency = 0,
+    PositionMode = "Draggable",
+    RememberPosition = true,
+    BorderEnabled = true,
+    BorderThickness = 1,
+    CornerRadius = 10,
+    ShadowsEnabled = true,
+    GlowEnabled = false,
+    TextScale = 1.0,
+    ClipEnabled = true,
+    CustomColors = nil,
+}
+
+-- Check if appearance has unsaved changes vs saved preset
 function isAppearanceDirty(current, saved)
     saved = saved or Settings:Get("hubAppearance","global") or {}
-    return current.Theme ~= normalizeThemeId(saved.Theme or saved.theme)
-        or current.Scale ~= saved.Scale
-        or current.Transparency ~= saved.Transparency
-        or current.TextScale ~= saved.TextScale
-        or current.Position ~= saved.Position
-        or current.PositionMode ~= saved.PositionMode
-        or current.BorderEnabled ~= saved.BorderEnabled
-        or current.BorderThickness ~= saved.BorderThickness
-        or current.CornerRadius ~= saved.CornerRadius
-        or current.ShadowsEnabled ~= saved.ShadowsEnabled
-        or current.GlowEnabled ~= saved.GlowEnabled
-        or current.RememberPosition ~= saved.RememberPosition
+    if not saved then return false end
+    local keys = {"PresetId", "BaseTheme", "Scale", "Transparency", "BorderEnabled", "BorderThickness", "CornerRadius", "ShadowsEnabled", "GlowEnabled"}
+    for _,k in ipairs(keys) do
+        if current[k] ~= saved[k] then return true end
+    end
+    if current.Overrides and saved.Overrides then
+        for k,v in pairs(current.Overrides) do
+            if saved.Overrides[k] ~= v then return true end
+        end
+        for k,v in pairs(saved.Overrides) do
+            if current.Overrides[k] ~= v then return true end
+        end
+    elseif current.Overrides or saved.Overrides then
+        return true
+    end
+    -- Legacy field check
+    if current.Theme ~= normalizeThemeId(saved.Theme or saved.theme) then return true end
+    return false
 end
 -- PresentationState — derived UI presentation, not intelligence
 PresentationState = { NavigationMode="Sidebar", Viewport=Vector2.new(620,520), WindowState="Normal", AppearanceGeneration=0 }
@@ -960,23 +987,72 @@ function ThemeSystem.SetHubTheme(themeId, save) ApplyTheme(themeId, "Hub", save)
 function ThemeSystem.SetSharedTheme(themeId) ApplyTheme(themeId, "Shared", false) end
 function ThemeSystem.SetVerityTheme() return VERITY_THEME end
 local function RefreshTheme() ApplyTheme(hubAppearance.Theme, "Hub", false) end
+
+-- ResolveAppearance: BaseTheme + UserOverrides = final appearance config
+-- Returns a snapshot, not persistent state
+local function ResolveAppearance()
+    local baseId = hubAppearance.BaseTheme or hubAppearance.PresetId or "Theme_01"
+    local baseTheme = THEMES[baseId] or THEMES.Theme_01
+    local overrides = hubAppearance.Overrides or {}
+    
+    -- Build resolved config from base + overrides
+    local resolved = {
+        BaseTheme = baseId,
+        PresetId = hubAppearance.PresetId or baseId,
+        Theme = baseId,
+        Scale = overrides.Scale or hubAppearance.Scale or 1.0,
+        Transparency = overrides.Transparency or hubAppearance.Transparency or 0,
+        BorderEnabled = overrides.BorderEnabled ~= nil and overrides.BorderEnabled or hubAppearance.BorderEnabled,
+        BorderThickness = overrides.BorderThickness or hubAppearance.BorderThickness or 1,
+        CornerRadius = overrides.CornerRadius or hubAppearance.CornerRadius or 10,
+        ShadowsEnabled = overrides.ShadowsEnabled ~= nil and overrides.ShadowsEnabled or hubAppearance.ShadowsEnabled,
+        GlowEnabled = overrides.GlowEnabled ~= nil and overrides.GlowEnabled or hubAppearance.GlowEnabled,
+        PositionMode = overrides.PositionMode or hubAppearance.PositionMode or "Draggable",
+        Position = overrides.Position or hubAppearance.Position,
+        RememberPosition = overrides.RememberPosition ~= nil and overrides.RememberPosition or hubAppearance.RememberPosition,
+        CustomColors = overrides.CustomColors or hubAppearance.CustomColors,
+        Modified = isAppearanceDirty(hubAppearance),
+    }
+    return resolved
+end
+
 -- Load saved appearance on boot (before UI creation, T already Slate)
 do
     local saved = Settings:Get("hubAppearance","global")
     if type(saved)=="table" and saved.Theme and THEMES[saved.Theme] then
-        hubAppearance = saved
+        -- Migrate legacy flat structure to new preset-based structure
+        hubAppearance.PresetId = saved.PresetId or saved.Theme
+        hubAppearance.BaseTheme = saved.BaseTheme or saved.Theme
+        hubAppearance.Overrides = saved.Overrides or {}
+        hubAppearance.Theme = saved.Theme
+        hubAppearance.Scale = saved.Scale or 1.0
+        hubAppearance.Transparency = saved.Transparency or 0
+        hubAppearance.BorderEnabled = saved.BorderEnabled ~= nil and saved.BorderEnabled or true
+        hubAppearance.BorderThickness = saved.BorderThickness or 1
+        hubAppearance.CornerRadius = saved.CornerRadius or 10
+        hubAppearance.ShadowsEnabled = saved.ShadowsEnabled ~= nil and saved.ShadowsEnabled or true
+        hubAppearance.GlowEnabled = saved.GlowEnabled or false
+        hubAppearance.CustomColors = saved.CustomColors
+        
         -- migrate old Draggable/Locked booleans to single PositionMode
-        if hubAppearance.PositionMode == nil then
-            if hubAppearance.Locked == true then hubAppearance.PositionMode="Locked"
-            elseif hubAppearance.Draggable == false then hubAppearance.PositionMode="Locked"
-            else hubAppearance.PositionMode="Draggable" end
-            hubAppearance.Draggable=nil hubAppearance.Locked=nil
-            Settings:Set("hubAppearance", hubAppearance, "global"); Settings:Save("global")
+        if saved.PositionMode then
+            hubAppearance.PositionMode = saved.PositionMode
+        elseif saved.Locked == true then
+            hubAppearance.PositionMode = "Locked"
+        elseif saved.Draggable == false then
+            hubAppearance.PositionMode = "Locked"
+        else
+            hubAppearance.PositionMode = "Draggable"
         end
-        if hubAppearance.PositionMode ~= "Locked" then hubAppearance.PositionMode="Draggable" end
+        hubAppearance.Draggable = nil
+        hubAppearance.Locked = nil
+        hubAppearance.Position = saved.Position
+        
+        if hubAppearance.PositionMode ~= "Locked" then hubAppearance.PositionMode = "Draggable" end
         HubState.Mode = hubAppearance.PositionMode
+        
         -- apply without save to avoid overwrite
-        for k,v in pairs(THEMES[saved.Theme].colors) do T[k]=v end
+        for k,v in pairs(THEMES[hubAppearance.Theme].colors) do T[k]=v end
         T.titleBar=Color3.fromHex("0f0f0f"); T.line=T.border
     end
 end
@@ -1538,6 +1614,18 @@ do
     EVENTS.on("tpbank:teleport", function(name) Verity:Set("happy") task.delay(0.8,function() Verity:Set("neutral") end) end)
 end
 -- Settings ? Appearance (Pass 3 Hub Themes, Hub-only) | single authoritative content lifecycle
+-- Stable action IDs for button mapping (not positional assumptions)
+local AppearanceActions = {
+    SelectPreset = "appearance.preset.select",
+    CustomizePreset = "appearance.preset.customize",
+    PickAccent = "appearance.accent.pick",
+    ResetChanges = "appearance.reset.changes",
+    SavePreset = "appearance.preset.save",
+    SaveAsPreset = "appearance.preset.saveas",
+    ToggleFullscreen = "appearance.fullscreen.toggle",
+    LockPosition = "appearance.position.lock",
+}
+
 do
     local AppearanceGeneration = 0
     local appCard = makeCard("Settings", "Appearance", nil)
@@ -1553,7 +1641,7 @@ do
         return new("TextLabel",{BackgroundTransparency=1, Size=UDim2.new(1,0,0,12), Font=FONT, Text=text, TextSize=9, TextColor3=T.dim, TextXAlignment=Enum.TextXAlignment.Left, ZIndex=13, Parent=appCard})
     end
 
-    -- live current-state summary
+    -- live current-state summary with preset-based info
     local sizeNames={["0.85"]="Small",["1.00"]="Normal",["1.15"]="Large",["1.30"]="XL"}
     local function scaleToName() return sizeNames[tostring(hubAppearance.Scale)] or "Normal" end
     local summaryLabel = new("TextLabel",{BackgroundTransparency=1, Size=UDim2.new(1,0,0,18), Font=FONT, TextSize=10, TextColor3=T.dim, TextXAlignment=Enum.TextXAlignment.Left, TextWrapped=true, AutomaticSize=Enum.AutomaticSize.Y, ZIndex=13, Parent=appCard})
@@ -1561,14 +1649,17 @@ do
         local th = THEMES[hubAppearance.Theme] or THEMES.Theme_01
         local pos = hubAppearance.Position or "Default"
         local trans = hubAppearance.Transparency or 0
-        summaryLabel.Text = string.format("%s | %s | %s | %d%% | %s", th.name, scaleToName(), pos, trans, HubState.Mode)
+        local modified = isAppearanceDirty(hubAppearance) and " *" or ""
+        summaryLabel.Text = string.format("%s%s | %s | %s | %d%% | %s", th.name, modified, scaleToName(), pos, trans, HubState.Mode)
     end
 
-    -- ===== PREVIEW (persistent, deterministic) =====
+    -- ===== PREVIEW (persistent, deterministic, interactive) =====
     local previewFrame
     local function RefreshAppearancePreview()
         if not previewFrame then return end
-        local th = THEMES[hubAppearance.Theme] or THEMES.Theme_01
+        -- Use ResolveAppearance for consistent state
+        local resolved = ResolveAppearance()
+        local th = THEMES[resolved.Theme] or THEMES.Theme_01
         local c = {}
         for k,v in pairs(th.colors) do c[k]=v end
         if hubAppearance.Theme=="Theme_07" and hubAppearance.CustomColors then
@@ -1963,12 +2054,28 @@ do
     new("TextLabel",{BackgroundTransparency=1, Size=UDim2.new(1,0,0,16), Font=FONT, Text="Restore the default appearance settings.", TextSize=10, TextColor3=T.dim, TextXAlignment=Enum.TextXAlignment.Left, ZIndex=13, Parent=appCard})
     local resetAppBtn = new("TextButton",{BackgroundColor3=T.panel, Size=UDim2.new(1,0,0,28), Text="Reset Appearance", Font=FONTB, TextSize=11, TextColor3=T.text, AutoButtonColor=false, ZIndex=14, Parent=appCard}) corner(resetAppBtn,8) stroke(resetAppBtn,T.border,1)
     resetAppBtn.MouseButton1Click:Connect(function()
-        hubAppearance = {Theme="Theme_01", CustomColors=nil, Scale=1.0, Position="Default", Transparency=0, PositionMode="Draggable", RememberPosition=true, BorderEnabled=true, BorderThickness=1, CornerRadius=10, ShadowsEnabled=true, GlowEnabled=false}
-        HubState.Mode="Draggable"
-        if hubScale then hubScale.Scale=1.0 end
-        if HubCanvasGroup then HubCanvasGroup.GroupTransparency=0 end
-        local vp=viewport(); local sw,sh=shell.AbsoluteSize.X, shell.AbsoluteSize.Y
-        shell.Position=offset(math.floor((vp.X-sw)/2), math.floor((vp.Y-sh)/2))
+        -- Reset to new preset-based structure
+        hubAppearance.PresetId = "Theme_01"
+        hubAppearance.BaseTheme = "Theme_01"
+        hubAppearance.Overrides = {}
+        hubAppearance.Theme = "Theme_01"
+        hubAppearance.CustomColors = nil
+        hubAppearance.Scale = 1.0
+        hubAppearance.Position = "Default"
+        hubAppearance.Transparency = 0
+        hubAppearance.PositionMode = "Draggable"
+        hubAppearance.RememberPosition = true
+        hubAppearance.BorderEnabled = true
+        hubAppearance.BorderThickness = 1
+        hubAppearance.CornerRadius = 10
+        hubAppearance.ShadowsEnabled = true
+        hubAppearance.GlowEnabled = false
+        
+        HubState.Mode = "Draggable"
+        if hubScale then hubScale.Scale = 1.0 end
+        if HubCanvasGroup then HubCanvasGroup.GroupTransparency = 0 end
+        local vp = viewport(); local sw,sh = shell.AbsoluteSize.X, shell.AbsoluteSize.Y
+        shell.Position = offset(math.floor((vp.X-sw)/2), math.floor((vp.Y-sh)/2))
         ThemeSystem.SetHubTheme("Theme_01", true)
         refreshThemeButtons(); refreshSize(); refreshPosition(); refreshSummary(); refreshMode(); RefreshAppearancePreview()
         transSlider.set(0)
