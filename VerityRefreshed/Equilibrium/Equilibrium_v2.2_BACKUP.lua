@@ -1,8 +1,7 @@
-﻿-- Equilibrium v2.2 | single file, no external modules required
--- Fixes: File explorer TP Bank, About tab layout, Puck "=" symbol, RBX asset backgrounds, clean load notification
--- Window: _ ⬜ × | Puck = | Theme-compatible background | Locked by default | X hide / hold unload
+﻿-- Equilibrium v1.1 COMPILED | single file, no external modules required
+-- Fixes: combined core + settings + context + verity + knowledge, mount debug, removed stray end, fixed new()/continue
+-- Window: true Windows _ ? | | Slate 070707 | V puck | Locked by default | X hide / hold unload
 -- Clock Independence: InteractionState.sequence (event order) | AssistantState.Revision (conversation version) | KnowledgeRegistry.Revision (knowledge version) | Reaction/Behavior cooldowns (temporal) | AppearanceGeneration (visual rebuild) | never cross-use
--- Load Notification: Clean "v2.2 • Universal Hub" (no verbose hex codes)
 
 -- single-instance cleanup (ownership attribute, legacy name fallback)
 pcall(function()
@@ -26,7 +25,7 @@ local Players=game:GetService("Players"); local RunService=game:GetService("RunS
 local TweenService=game:GetService("TweenService"); local Lighting=game:GetService("Lighting"); local HttpService=game:GetService("HttpService")
 local TeleportService=game:GetService("TeleportService"); local GuiService=game:GetService("GuiService"); local Workspace=game:GetService("Workspace")
 local LP=Players.LocalPlayer; local Camera=Workspace.CurrentCamera or Workspace:FindFirstChildOfClass("Camera")
-print("[Equilibrium] boot | "..BRAND.." v2.2")
+print("[Equilibrium] boot | "..BRAND.." v2.7.2")
 
 -- ===== Settings (file+memory, inlined) =====
 local Settings={}; do
@@ -114,17 +113,11 @@ THEMES={
     Theme_09={id="Theme_09", name="Forest", colors={bg=Color3.fromHex("07100a"), panel=Color3.fromHex("0f1f16"), panel2=Color3.fromHex("142a1e"), border=Color3.fromHex("1e3a2a"), borderHover=Color3.fromHex("2a4a36"), text=Color3.fromHex("e0f0e6"), subtext=Color3.fromHex("8fb8a0"), dim=Color3.fromHex("6a9a80"), accent=Color3.fromHex("2ecc71"), accentDim=Color3.fromHex("239a55"), on=Color3.fromHex("2ecc71"), off=Color3.fromHex("4b5563"), warn=Color3.fromHex("e74c3c"), danger=Color3.fromHex("c0392b"), success=Color3.fromHex("2ecc71")}, effects={corner=10, border=1}},
     Theme_10={id="Theme_10", name="Amethyst", colors={bg=Color3.fromHex("0d0a14"), panel=Color3.fromHex("1a1230"), panel2=Color3.fromHex("221840"), border=Color3.fromHex("2e1f4a"), borderHover=Color3.fromHex("3e2a63"), text=Color3.fromHex("e8e0ff"), subtext=Color3.fromHex("a898c8"), dim=Color3.fromHex("7e6ea0"), accent=Color3.fromHex("9b59ff"), accentDim=Color3.fromHex("7a3fcc"), on=Color3.fromHex("9b59ff"), off=Color3.fromHex("4b5563"), warn=Color3.fromHex("e84393"), danger=Color3.fromHex("c50f1f"), success=Color3.fromHex("5fdc82")}, effects={corner=10, border=1}},
     Theme_11={id="Theme_11", name="Abyss", colors={bg=Color3.fromHex("05080c"), panel=Color3.fromHex("0d1420"), panel2=Color3.fromHex("111e30"), border=Color3.fromHex("1a2a40"), borderHover=Color3.fromHex("243a55"), text=Color3.fromHex("d8e8ff"), subtext=Color3.fromHex("8aa0b8"), dim=Color3.fromHex("6a8098"), accent=Color3.fromHex("00d4ff"), accentDim=Color3.fromHex("00a8cc"), on=Color3.fromHex("00d4ff"), off=Color3.fromHex("4b5563"), warn=Color3.fromHex("e81123"), danger=Color3.fromHex("c50f1f"), success=Color3.fromHex("00d4ff")}, effects={corner=10, border=1}},
-    -- RBX Asset Background Presets (Puck Mode compatible)
-    Theme_12={id="Theme_12", name="Ocean", assetId="16119734667", colors={bg=Color3.fromHex("0a1628"), panel=Color3.fromHex("0f1f35"), panel2=Color3.fromHex("142844"), border=Color3.fromHex("1e3a5a"), borderHover=Color3.fromHex("2a4a70"), text=Color3.fromHex("e0e8f0"), subtext=Color3.fromHex("8aa0b8"), dim=Color3.fromHex("6a8098"), accent=Color3.fromHex("4a9eff"), accentDim=Color3.fromHex("3a8edf"), on=Color3.fromHex("5fdc82"), off=Color3.fromHex("4b5563"), warn=Color3.fromHex("e81123"), danger=Color3.fromHex("c50f1f"), success=Color3.fromHex("5fdc82")}, effects={corner=10, border=1}},
-    Theme_13={id="Theme_13", name="Dusk", assetId="16119734889", colors={bg=Color3.fromHex("1a0f14"), panel=Color3.fromHex("25141e"), panel2=Color3.fromHex("301828"), border=Color3.fromHex("4a2035"), borderHover=Color3.fromHex("5a2a45"), text=Color3.fromHex("f0e0e6"), subtext=Color3.fromHex("b898a8"), dim=Color3.fromHex("9a7a88"), accent=Color3.fromHex("ff6b9d"), accentDim=Color3.fromHex("df5a8d"), on=Color3.fromHex("5fdc82"), off=Color3.fromHex("4b5563"), warn=Color3.fromHex("ff8a6b"), danger=Color3.fromHex("c50f1f"), success=Color3.fromHex("5fdc82")}, effects={corner=10, border=1}},
-    Theme_14={id="Theme_14", name="Crimson", assetId="16119735012", colors={bg=Color3.fromHex("1a0a0a"), panel=Color3.fromHex("251010"), panel2=Color3.fromHex("301414"), border=Color3.fromHex("4a1a1a"), borderHover=Color3.fromHex("5a2424"), text=Color3.fromHex("f0e0e0"), subtext=Color3.fromHex("b89898"), dim=Color3.fromHex("9a7a7a"), accent=Color3.fromHex("ff4d4d"), accentDim=Color3.fromHex("df3a3a"), on=Color3.fromHex("5fdc82"), off=Color3.fromHex("4b5563"), warn=Color3.fromHex("ff6b6b"), danger=Color3.fromHex("c50f1f"), success=Color3.fromHex("5fdc82")}, effects={corner=10, border=1}},
-    Theme_15={id="Theme_15", name="Nebula", assetId="16119735234", colors={bg=Color3.fromHex("0f0a1a"), panel=Color3.fromHex("141025"), panel2=Color3.fromHex("1a1430"), border=Color3.fromHex("2a1a4a"), borderHover=Color3.fromHex("3a245a"), text=Color3.fromHex("e8e0f0"), subtext=Color3.fromHex("a098b8"), dim=Color3.fromHex("807a9a"), accent=Color3.fromHex("9b59ff"), accentDim=Color3.fromHex("8a48df"), on=Color3.fromHex("5fdc82"), off=Color3.fromHex("4b5563"), warn=Color3.fromHex("e84393"), danger=Color3.fromHex("c50f1f"), success=Color3.fromHex("5fdc82")}, effects={corner=10, border=1}},
-    Theme_16={id="Theme_16", name="Aurora", assetId="16119735456", colors={bg=Color3.fromHex("0a1a14"), panel=Color3.fromHex("0f251e"), panel2=Color3.fromHex("143028"), border=Color3.fromHex("1a4a3a"), borderHover=Color3.fromHex("245a4a"), text=Color3.fromHex("e0f0e8"), subtext=Color3.fromHex("98b8a8"), dim=Color3.fromHex("7a9a88"), accent=Color3.fromHex("2ecc71"), accentDim=Color3.fromHex("239a55"), on=Color3.fromHex("5fdc82"), off=Color3.fromHex("4b5563"), warn=Color3.fromHex("e74c3c"), danger=Color3.fromHex("c0392b"), success=Color3.fromHex("2ecc71")}, effects={corner=10, border=1}},
 }
 -- Active semantic tokens (Hub only)
 T={bg=THEMES.Theme_01.colors.bg, panel=THEMES.Theme_01.colors.panel, panel2=THEMES.Theme_01.colors.panel2, titleBar=Color3.fromHex("0f0f0f"), border=THEMES.Theme_01.colors.border, borderHover=THEMES.Theme_01.colors.borderHover, line=Color3.fromHex("252525"), text=THEMES.Theme_01.colors.text, subtext=THEMES.Theme_01.colors.subtext, dim=THEMES.Theme_01.colors.dim, accent=THEMES.Theme_01.colors.accent, accent2=Color3.fromHex("8a8dc2"), accentDim=THEMES.Theme_01.colors.accentDim, on=THEMES.Theme_01.colors.on, off=THEMES.Theme_01.colors.off, warn=THEMES.Theme_01.colors.warn, warnHover=Color3.fromHex("c50f1f"), danger=THEMES.Theme_01.colors.danger, success=THEMES.Theme_01.colors.success}
 -- titleBar stays near-black for contrast across themes; line matches border
-THEME_ORDER={"Theme_01","Theme_02","Theme_03","Theme_04","Theme_05","Theme_06","Theme_12","Theme_13","Theme_14","Theme_15","Theme_16","Theme_08","Theme_09","Theme_10","Theme_11","Theme_07"}
+THEME_ORDER={"Theme_01","Theme_02","Theme_03","Theme_04","Theme_05","Theme_06","Theme_08","Theme_09","Theme_10","Theme_11","Theme_07"}
 local THEME_ALIASES={Slate="Theme_01", Grey="Theme_02", Galaxy="Theme_03", Minimal="Theme_04", Midnight="Theme_05", Warm="Theme_06", Jester="Theme_08", Forest="Theme_09", Amethyst="Theme_10", Abyss="Theme_11"}
 local function normalizeThemeId(id) return THEME_ALIASES[id] or id or "Theme_01" end
 GOLD = Color3.fromRGB(201,168,106) -- selection gold outline
@@ -1274,18 +1267,18 @@ local function winBtn(txt,isClose)
     b.MouseButton1Down:Connect(function() b.BackgroundColor3 = isClose and T.warnHover or T.border end)
     return b
 end
-local btnMin=winBtn("_",false); local btnMax=winBtn("⬜",false); local btnClose=winBtn("×","�",true)
+local btnMin=winBtn("_",false); local btnMax=winBtn("?",false); local btnClose=winBtn("�",true)
 do local hold,holdT
     btnClose.MouseButton1Down:Connect(function() hold=true holdT=tick() task.spawn(function() while hold and tick()-holdT<0.9 do task.wait(0.05) end if hold and tick()-holdT>=0.9 then hold=false btnClose.Text="�"; task.wait(0.18) local fn=getgenv()[UNLOAD_KEY] if fn then pcall(fn) end btnClose.Text="�" end end) end)
     btnClose.MouseButton1Up:Connect(function() if not hold then return end local d=tick()-holdT hold=false btnClose.Text="�" if d<0.9 then tw(canvas,TweenInfo.new(0.16),{GroupTransparency=1}).Completed:Wait() screen.Enabled=false canvas.GroupTransparency=0 pushToast("Hidden | RightShift to restore","warn",2) end end)
     btnClose.MouseLeave:Connect(function() hold=false btnClose.Text="�" end)
 end
 
--- Puck = (equals sign, theme-compatible)
+-- Puck V
 local PUCK=56
 local puck=new("TextButton",{BackgroundColor3=T.panel, Size=offset(PUCK,PUCK), Position=offset(centeredPos(PUCK,PUCK).X,centeredPos(PUCK,PUCK).Y), Text="", AutoButtonColor=false, BorderSizePixel=0, Visible=false, ZIndex=40, Parent=screen}) corner(puck,16) stroke(puck,T.border,1)
 rootMaid:give(puck)
-new("TextLabel",{BackgroundTransparency=1, Size=UDim2.fromScale(1,1), Font=FONTB, Text="=", TextSize=22, TextColor3=T.text, ZIndex=41, Parent=puck})
+new("TextLabel",{BackgroundTransparency=1, Size=UDim2.fromScale(1,1), Font=FONTB, Text="V", TextSize=22, TextColor3=T.text, ZIndex=41, Parent=puck})
 local puckDot=new("Frame",{BackgroundColor3=T.on, Size=offset(10,10), Position=UDim2.new(1,-8,0,-2), Visible=false, ZIndex=42, Parent=puck}) corner(puckDot,5)
 local minimized=false; local animating=false; local isMax=false; local savedRect={pos=shellRect.pos, size=shellRect.size}
 local function doMinimize() if minimized or animating then return end animating=true minimized=true shellRect.pos=Vector2.new(shell.Position.X.Offset,shell.Position.Y.Offset) shellRect.size=Vector2.new(shell.AbsoluteSize.X,shell.AbsoluteSize.Y) local t=tw(canvas,TweenInfo.new(0.14),{GroupTransparency=1}) t.Completed:Wait() shell.Visible=false canvas.GroupTransparency=0 local vp=viewport() local p=Vector2.new(math.clamp(shellRect.pos.X+shellRect.size.X/2-PUCK/2,0,vp.X-PUCK), math.clamp(shellRect.pos.Y+shellRect.size.Y/2-PUCK/2,0,vp.Y-PUCK)) puck.Position=offset(p.X,p.Y) puck.Visible=true animating=false end
@@ -1298,7 +1291,7 @@ do local drag=false; local sd,sp
 end
 btnMin.Activated:Connect(doMinimize)
 local function fullscreenRect() local inset=GuiService:GetGuiInset() local vp=viewport() return Vector2.new(4,inset.Y+4), Vector2.new(vp.X-8, vp.Y-inset.Y-8) end
-btnMax.Activated:Connect(function() if minimized then return end if not isMax then savedRect.pos=Vector2.new(shell.Position.X.Offset,shell.Position.Y.Offset) savedRect.size=Vector2.new(shell.AbsoluteSize.X,shell.AbsoluteSize.Y) local p,s=fullscreenRect() tw(shell,MOTION.win,{Size=offset(s.X,s.Y), Position=offset(p.X,p.Y)}) tw(shellCorner,MOTION.win,{CornerRadius=UDim.new(0,0)}) btnMax.Text="⬜" isMax=true else tw(shell,MOTION.win,{Size=offset(savedRect.size.X,savedRect.size.Y), Position=offset(savedRect.pos.X,savedRect.pos.Y)}) tw(shellCorner,MOTION.win,{CornerRadius=UDim.new(0,10)}) btnMax.Text="❐" isMax=false end end)
+btnMax.Activated:Connect(function() if minimized then return end if not isMax then savedRect.pos=Vector2.new(shell.Position.X.Offset,shell.Position.Y.Offset) savedRect.size=Vector2.new(shell.AbsoluteSize.X,shell.AbsoluteSize.Y) local p,s=fullscreenRect() tw(shell,MOTION.win,{Size=offset(s.X,s.Y), Position=offset(p.X,p.Y)}) tw(shellCorner,MOTION.win,{CornerRadius=UDim.new(0,0)}) btnMax.Text="?" isMax=true else tw(shell,MOTION.win,{Size=offset(savedRect.size.X,savedRect.size.Y), Position=offset(savedRect.pos.X,savedRect.pos.Y)}) tw(shellCorner,MOTION.win,{CornerRadius=UDim.new(0,10)}) btnMax.Text="?" isMax=false end end)
 -- title drag gated by HubState.Draggable (independent from Verity), 20px viewport-safe clamp
 do local drag=false; local sd,sp
     local function clampShell(x,y)
@@ -1357,26 +1350,19 @@ end
 local function makeSlider(parent,cfg)
     local min,max,step = cfg.min or 0, cfg.max or 100, cfg.step or 1
     local value=cfg.default or min
-    local row=new("Frame",{BackgroundTransparency=1, Size=UDim2.new(1,0,0,28), ZIndex=13, Parent=parent})
-    new("TextLabel",{BackgroundTransparency=1, Size=UDim2.new(0,90,0,28), Font=FONT, Text=cfg.label or "Value", TextSize=11, TextColor3=T.dim, TextXAlignment=Enum.TextXAlignment.Left, ZIndex=14, Parent=row})
-    local valLabel=new("TextLabel",{BackgroundTransparency=1, Size=UDim2.new(0,50,0,28), Position=UDim2.new(1,-60,0,0), Font=FONTB, Text=tostring(value), TextSize=11, TextColor3=T.text, TextXAlignment=Enum.TextXAlignment.Right, ZIndex=14, Parent=row})
-    local track=new("Frame",{BackgroundColor3=T.off, Size=UDim2.new(1,-160,0,6), Position=UDim2.new(0,90,0.5,-3), ZIndex=14, Parent=row}) corner(track,3)
-    local fill=new("Frame",{BackgroundColor3=T.accent, Size=UDim2.new((value-min)/(max-min),0,1,0), ZIndex=15, Parent=track}) corner(fill,3)
-    local knob=new("Frame",{BackgroundColor3=T.text, Size=offset(16,16), Position=UDim2.new((value-min)/(max-min),-8,0.5,-8), ZIndex=16, Parent=track}) corner(knob,8)
+    local row=new("Frame",{BackgroundTransparency=1, Size=UDim2.new(1,0,0,22), ZIndex=13, Parent=parent})
+    new("TextLabel",{BackgroundTransparency=1, Size=UDim2.new(0,90,1,0), Font=FONT, Text=cfg.label or "Value", TextSize=11, TextColor3=T.dim, TextXAlignment=Enum.TextXAlignment.Left, ZIndex=14, Parent=row})
+    local valLabel=new("TextLabel",{BackgroundTransparency=1, Size=UDim2.new(0,40,1,0), Position=UDim2.new(1,-40,0,0), Font=FONTB, Text=tostring(value), TextSize=11, TextColor3=T.text, TextXAlignment=Enum.TextXAlignment.Right, ZIndex=14, Parent=row})
+    local track=new("Frame",{BackgroundColor3=T.off, Size=UDim2.new(1,-140,0,4), Position=UDim2.new(0,90,0.5,-2), ZIndex=14, Parent=row}) corner(track,2)
+    local fill=new("Frame",{BackgroundColor3=T.accent, Size=UDim2.new((value-min)/(max-min),0,1,0), ZIndex=15, Parent=track}) corner(fill,2)
+    local knob=new("Frame",{BackgroundColor3=T.text, Size=offset(14,14), Position=UDim2.new((value-min)/(max-min),-7,0.5,-7), ZIndex=16, Parent=track}) corner(knob,7)
     local function set(v, silent)
         v=math.clamp(math.floor(v/step+0.5)*step, min, max)
         value=v
         local t=(value-min)/(max-min)
         fill.Size=UDim2.new(t,0,1,0)
-        knob.Position=UDim2.new(t,-8,0.5,-8)
-        -- Format display value: use fixed decimal for small ranges, integer for large
-        if step < 0.1 then
-            valLabel.Text=string.format("%.2f", value)
-        elseif step < 1 then
-            valLabel.Text=string.format("%.1f", value)
-        else
-            valLabel.Text=tostring(math.floor(value))
-        end
+        knob.Position=UDim2.new(t,-7,0.5,-7)
+        valLabel.Text=tostring(value)
         if not silent and cfg.onChange then pcall(cfg.onChange, value) end
     end
     local dragging=false
@@ -1421,29 +1407,7 @@ register({id="teleport", name="Teleport to Player", category="Teleport", desc="C
 -- Tabs
 local TABS={"Movement","Visuals","Teleport","Server","Settings","Deloader","About"}; local currentTab=TABS[1]; local tabButtons={}; local cards={}
 local function refresh() for _,c in ipairs(cards) do c.frame.Visible=(currentTab==c.tab) end end
-for _,name in ipairs(TABS) do 
-    local b=new("TextButton",{BackgroundTransparency=1, Size=UDim2.new(1,0,0,36), Text="", AutoButtonColor=false, ZIndex=12, Parent=tabBar}) 
-    corner(b,8)
-    local lbl=new("TextLabel",{BackgroundTransparency=1, Size=UDim2.fromScale(1,1), Font=FONT, Text=name, TextSize=12, TextColor3=T.dim, ZIndex=13, Parent=b}) 
-    b.Activated:Connect(function() 
-        currentTab=name 
-        for _,bb in pairs(tabButtons) do 
-            bb.lbl.TextColor3=T.dim 
-            bb.btn.BackgroundTransparency=1
-            bb.btn.BackgroundColor3=T.bg
-        end 
-        lbl.TextColor3=T.text 
-        b.BackgroundTransparency=0
-        b.BackgroundColor3=T.panel
-        refresh() 
-    end) 
-    tabButtons[name]={btn=b,lbl=lbl} 
-    if name==currentTab then 
-        lbl.TextColor3=T.text 
-        b.BackgroundTransparency=0
-        b.BackgroundColor3=T.panel
-    end 
-end
+for _,name in ipairs(TABS) do local b=new("TextButton",{BackgroundTransparency=1, Size=UDim2.new(1,0,0,36), Text="", AutoButtonColor=false, ZIndex=12, Parent=tabBar}) local lbl=new("TextLabel",{BackgroundTransparency=1, Size=UDim2.fromScale(1,1), Font=FONT, Text=name, TextSize=12, TextColor3=T.dim, ZIndex=13, Parent=b}) b.Activated:Connect(function() currentTab=name for _,bb in pairs(tabButtons) do bb.lbl.TextColor3=T.dim end lbl.TextColor3=T.text refresh() end) tabButtons[name]={btn=b,lbl=lbl} if name==currentTab then lbl.TextColor3=T.text end end
 local function makeCard(tab,title,desc) local card=new("Frame",{BackgroundColor3=T.panel, Size=UDim2.new(1,0,0,0), AutomaticSize=Enum.AutomaticSize.Y, BorderSizePixel=0, Visible=tab==currentTab, ZIndex=12, Parent=page}) corner(card,10) stroke(card,T.border) pad(card,10,10,12,12) vlist(card,8) new("TextLabel",{BackgroundTransparency=1, Size=UDim2.new(1,0,0,16), Font=FONTB, Text=title, TextSize=13, TextColor3=T.text, TextXAlignment=Enum.TextXAlignment.Left, TextTruncate=Enum.TextTruncate.AtEnd, ZIndex=13, Parent=card}) if desc then new("TextLabel",{BackgroundTransparency=1, Size=UDim2.new(1,0,0,0), AutomaticSize=Enum.AutomaticSize.Y, Font=FONT, Text=desc, TextSize=10, TextColor3=T.dim, TextXAlignment=Enum.TextXAlignment.Left, TextWrapped=true, ZIndex=13, Parent=card}) end local c={frame=card,tab=tab} table.insert(cards,c) return card end
 local catMap={Movement={}, Visuals={}, Teleport={}, Server={}, Settings={}} for _,id in ipairs(order) do local f=Features[id] table.insert(catMap[f.category] or catMap["Settings"], f) end
 for _,cat in ipairs(TABS) do for _,def in ipairs(catMap[cat] or {}) do
@@ -1638,84 +1602,6 @@ do
         else pushToast("Invalid JSON","warn",1) end
     end)
     
-    -- Current coordinates display + Save button
-    local coordsRow = new("Frame",{BackgroundTransparency=1, Size=UDim2.new(1,0,0,28), ZIndex=13, Parent=tpCard}) hlist(coordsRow,6)
-    local coordsDisplay = new("TextBox",{BackgroundColor3=T.bg, Size=UDim2.new(1,-80,0,28), Font=FONT, Text="", PlaceholderText="Current coordinates", PlaceholderColor3=T.dim, TextSize=10, TextColor3=T.subtext, ClearTextOnFocus=false, ZIndex=14, Parent=coordsRow}) corner(coordsDisplay,8) stroke(coordsDisplay,T.border,1) pad(coordsDisplay,0,0,8,8)
-    local savePosBtn = new("TextButton",{BackgroundColor3=T.accent, Size=UDim2.new(0,76,0,28), Text="Save position", Font=FONTB, TextSize=10, TextColor3=T.text, AutoButtonColor=false, ZIndex=14, Parent=coordsRow}) corner(savePosBtn,8)
-    
-    -- Update coordinates display periodically
-    local function updateCoordsDisplay()
-        if alive() and Char.root then
-            local pos = Char.root.Position
-            coordsDisplay.Text = string.format("X %.2f  Y %.2f  Z %.2f", pos.X, pos.Y, pos.Z)
-        end
-    end
-    
-    -- Initial update and heartbeat
-    updateCoordsDisplay()
-    local coordsConn = RunService.Heartbeat:Connect(function()
-        if tpCard.Visible and alive() then updateCoordsDisplay() end
-    end)
-    rootMaid:give(coordsConn)
-    
-    savePosBtn.Activated:Connect(function()
-        if not alive() then pushToast("No character","warn") return end
-        local pg,box,saveBtn,cancelBtn,folderBox = ensurePrompt()
-        box.Text="" box.PlaceholderText="New checkpoint"
-        folderBox.Text="" folderBox.PlaceholderText="Leave empty for root"
-        pg.Visible=true box:CaptureFocus()
-        
-        if promptSaveConn then promptSaveConn:Disconnect() end
-        promptSaveConn = saveBtn.Activated:Connect(function()
-            local name = box.Text:gsub("^%s+",""):gsub("%s+$","")
-            if name=="" then name="Checkpoint_"..(#getBank().positions+1) end
-            
-            local cf = Char.root.CFrame
-            local d = serialize(cf)
-            local state = getBank()
-            
-            -- Determine folder from dropdown
-            local folderName = folderBox.Text:gsub("^%s+",""):gsub("%s+$","")
-            local folderId = nil
-            if folderName ~= "" then
-                -- Find or create folder
-                local foundFolder = nil
-                for _,f in ipairs(state.folders) do
-                    if f.name:lower() == folderName:lower() then
-                        foundFolder = f
-                        break
-                    end
-                end
-                if not foundFolder then
-                    table.insert(state.folders, {
-                        id = HttpService:GenerateGUID(false),
-                        name = folderName,
-                        parentId = nil,
-                        expanded = false,
-                        createdAt = os.time()
-                    })
-                    foundFolder = state.folders[#state.folders]
-                end
-                folderId = foundFolder.id
-            end
-            
-            table.insert(state.positions, {
-                id = HttpService:GenerateGUID(false),
-                name=name,
-                px=d.px, py=d.py, pz=d.pz,
-                lx=d.lx, ly=d.ly, lz=d.lz,
-                folderId=folderId,
-                createdAt=os.time(),
-                updatedAt=os.time()
-            })
-            saveBank(state)
-            pg.Visible=false
-            promptSaveConn:Disconnect()
-            pushToast("Saved "..name.." to "..(folderName or "root"),"warn",1.4)
-            pcall(refreshTree)
-        end)
-    end)
-    
     -- Tree container
     local treeHolder = new("ScrollingFrame",{BackgroundTransparency=1, Size=UDim2.new(1,0,0,180), BorderSizePixel=0, ScrollBarThickness=4, ScrollBarImageColor3=T.border, CanvasSize=UDim2.new(0,0,0,0), AutomaticCanvasSize=Enum.AutomaticSize.Y, ScrollingDirection=Enum.ScrollingDirection.Y, ZIndex=13, Parent=tpCard})
     local treeLayout = new("UIListLayout",{SortOrder=Enum.SortOrder.LayoutOrder, Padding=UDim2.fromOffset(0,4), Parent=treeHolder})
@@ -1763,22 +1649,6 @@ do
         })
         saveBank(state)
         pcall(refreshTree)
-    end
-    
-    -- Create folder prompt
-    local folderPromptGui, folderPromptBox, folderPromptSaveBtn, folderPromptCancelBtn
-    local folderPromptConn
-    local function ensureFolderPrompt()
-        if folderPromptGui and folderPromptGui.Parent then return folderPromptGui, folderPromptBox, folderPromptSaveBtn, folderPromptCancelBtn end
-        folderPromptGui = new("Frame",{BackgroundColor3=Color3.fromRGB(0,0,0), BackgroundTransparency=0.35, Size=UDim2.fromScale(1,1), Visible=false, ZIndex=50, Parent=screen})
-        local box = new("Frame",{BackgroundColor3=T.panel, Size=offset(280,120), Position=UDim2.new(0.5,0,0.5,0), AnchorPoint=Vector2.new(0.5,0.5), ZIndex=51, Parent=folderPromptGui}) corner(box,12) stroke(box,T.border,1) pad(box,10,10,10,10) vlist(box,6)
-        new("TextLabel",{BackgroundTransparency=1, Size=UDim2.new(1,0,0,14), Font=FONTB, Text="Create Folder", TextSize=11, TextColor3=T.text, ZIndex=52, Parent=box})
-        folderPromptBox = new("TextBox",{BackgroundColor3=T.bg, Size=UDim2.new(1,0,0,26), Font=FONT, Text="", PlaceholderText="Folder name", PlaceholderColor3=T.dim, TextSize=11, TextColor3=T.text, ClearTextOnFocus=false, ZIndex=52, Parent=box}) corner(folderPromptBox,6) stroke(folderPromptBox,T.border,1) pad(folderPromptBox,0,0,6,6)
-        local row=new("Frame",{BackgroundTransparency=1, Size=UDim2.new(1,0,0,26), ZIndex=52, Parent=box}) hlist(row,4)
-        folderPromptSaveBtn = new("TextButton",{BackgroundColor3=T.accent, Size=UDim2.new(0.5,-3,0,26), Text="Create", Font=FONTB, TextSize=10, TextColor3=T.text, AutoButtonColor=false, ZIndex=53, Parent=row}) corner(folderPromptSaveBtn,6)
-        folderPromptCancelBtn = new("TextButton",{BackgroundColor3=T.panel, Size=UDim2.new(0.5,-3,0,26), Text="Cancel", Font=FONT, TextSize=10, TextColor3=T.text, AutoButtonColor=false, ZIndex=53, Parent=row}) corner(folderPromptCancelBtn,6) stroke(folderPromptCancelBtn,T.border,1)
-        folderPromptCancelBtn.Activated:Connect(function() folderPromptGui.Visible=false end)
-        return folderPromptGui, folderPromptBox, folderPromptSaveBtn, folderPromptCancelBtn
     end
     
     local function deleteFolder(folderId, moveContents)
@@ -1947,7 +1817,7 @@ do
             pad(folderCard,8,8,4,4)
             
             local chevron = isExpanded and "▾" or "▸"
-            local folderBtn = new("TextButton",{BackgroundTransparency=1, Size=UDim2.new(1,-40,0,24), Text=chevron.."  "..folder.name, Font=FONTB, TextSize=11, TextColor3=T.text, TextXAlignment=Enum.TextXAlignment.Left, AutoButtonColor=false, ZIndex=15, Parent=folderCard})
+            local folderBtn = new("TextButton",{BackgroundTransparency=1, Size=UDim2.new(1,-40,0,24), Text=chevron.."  📁 "..folder.name, Font=FONTB, TextSize=11, TextColor3=T.text, TextXAlignment=Enum.TextXAlignment.Left, AutoButtonColor=false, ZIndex=15, Parent=folderCard})
             folderBtn.Activated:Connect(function() toggleFolder(folder.id) end)
             
             local delBtn = new("TextButton",{BackgroundColor3=T.panel, Size=offset(32,22), Position=UDim2.new(1,-36,0,1), Text="⋮", Font=FONTB, TextSize=12, TextColor3=T.dim, AutoButtonColor=false, ZIndex=15, Parent=folderCard}) corner(delBtn,6)
@@ -2035,17 +1905,8 @@ do
     local createFolderRow = new("Frame",{BackgroundTransparency=1, Size=UDim2.new(1,0,0,28), ZIndex=13, Parent=tpCard}) hlist(createFolderRow,6)
     local createFolderBtn = new("TextButton",{BackgroundColor3=T.panel, Size=UDim2.new(1,0,0,28), Text="+ Create folder", Font=FONTB, TextSize=11, TextColor3=T.text, AutoButtonColor=false, ZIndex=14, Parent=createFolderRow}) corner(createFolderBtn,8) stroke(createFolderBtn,T.border,1)
     createFolderBtn.Activated:Connect(function()
-        local pg,box,saveBtn,cancelBtn = ensureFolderPrompt()
-        box.Text="" box.PlaceholderText="Folder name"
-        pg.Visible=true box:CaptureFocus()
-        if folderPromptConn then folderPromptConn:Disconnect() end
-        folderPromptConn = saveBtn.Activated:Connect(function()
-            local name = box.Text:gsub("^%s+",""):gsub("%s+$","")
-            if name=="" then name="New Folder" end
-            createFolder(name)
-            pg.Visible=false
-            folderPromptConn:Disconnect()
-        end)
+        local state=getBank()
+        createFolder("New Folder")
     end)
     
     -- Export button (compact, in header area)
@@ -2308,25 +2169,13 @@ do
     local cRow = new("Frame",{BackgroundTransparency=1, Size=UDim2.new(1,0,0,28), ZIndex=13, Parent=customFrame}) hlist(cRow,6)
     tokenBtn = new("TextButton",{BackgroundColor3=T.panel, Size=UDim2.new(0,84,0,28), Text="Accent ?", Font=FONT, TextSize=10, TextColor3=T.text, AutoButtonColor=false, ZIndex=14, Parent=cRow}) corner(tokenBtn,8) stroke(tokenBtn,T.border,1)
     tokenBtn.Activated:Connect(function() if tokenMenuOpen then closeTokenMenu() else openTokenMenu() end end)
-    hexEntry = new("TextBox",{BackgroundColor3=T.bg, Size=UDim2.new(0,90,0,28), Font=FONT, Text=tokenHex("accent"), PlaceholderText="#RRGGBB", PlaceholderColor3=T.dim, TextSize=10, TextColor3=T.text, ClearTextOnFocus=false, ZIndex=14, Parent=cRow}) corner(hexEntry,8) stroke(hexEntry,T.border,1) pad(hexEntry,0,0,6,6)
+    hexEntry = new("TextBox",{BackgroundColor3=T.bg, Size=UDim2.new(0,110,0,28), Font=FONT, Text=tokenHex("accent"), PlaceholderText="#RRGGBB", PlaceholderColor3=T.dim, TextSize=11, TextColor3=T.text, ClearTextOnFocus=false, ZIndex=14, Parent=cRow}) corner(hexEntry,8) stroke(hexEntry,T.border,1) pad(hexEntry,0,0,8,8)
     hexEntry:GetPropertyChangedSignal("Text"):Connect(function()
         local txt=hexEntry.Text:gsub("%s+","")
         if txt:match("^#%x%x%x%x%x%x$") then
             local ok,col=pcall(Color3.fromHex, txt:gsub("#",""))
-            if ok and col then 
-                swatchPreview.BackgroundColor3 = col 
-                hubAppearance.CustomColors = hubAppearance.CustomColors or {}
-                hubAppearance.CustomColors[selectedToken]=txt
-                ThemeSystem.SetHubTheme("Theme_07", true)
-                pcall(function() refreshDirty() end)
-            end
+            if ok and col then swatchPreview.BackgroundColor3 = col end
         end
-    end)
-    -- Hex editor button (opens color picker dropdown)
-    local hexEditorBtn = new("TextButton",{BackgroundColor3=T.panel, Size=UDim2.new(0,28,0,28), Text="🎨", Font=FONT, TextSize=12, TextColor3=T.text, AutoButtonColor=false, ZIndex=14, Parent=cRow}) corner(hexEditorBtn,8) stroke(hexEditorBtn,T.border,1)
-    hexEditorBtn.Activated:Connect(function()
-        -- Toggle token menu as color picker
-        if tokenMenuOpen then closeTokenMenu() else openTokenMenu() end
     end)
     swatchPreview = new("Frame",{BackgroundColor3=T.accent, Size=UDim2.fromOffset(20,20), ZIndex=14, Parent=cRow}) corner(swatchPreview,4) stroke(swatchPreview,T.border,1)
     -- Wheel + hex + presets (paint-style)
@@ -2352,7 +2201,7 @@ do
         pcall(function() refreshDirty() end)
         pushToast("Custom "..(tokenById[selectedToken] and tokenById[selectedToken].label or selectedToken).." set","warn",1.0)
     end)
-    local resetCustomBtn = new("TextButton",{BackgroundColor3=T.panel, Size=UDim2.new(0.5,-4,0,28), Text="Reset Custom", Font=FONT, TextSize=10, TextColor3=T.text, AutoButtonColor=false, ZIndex=14, Parent=customFrame}) corner(resetCustomBtn,8) stroke(resetCustomBtn,T.border,1)
+    local resetCustomBtn = new("TextButton",{BackgroundColor3=T.panel, Size=UDim2.new(1,0,0,24), Text="Reset Custom (clone current)", Font=FONT, TextSize=11, TextColor3=T.text, AutoButtonColor=false, ZIndex=14, Parent=customFrame}) corner(resetCustomBtn,8) stroke(resetCustomBtn,T.border,1)
     resetCustomBtn.MouseButton1Click:Connect(function()
         local srcId = hubAppearance.Theme ~= "Theme_07" and hubAppearance.Theme or "Theme_01"
         local src = THEMES[srcId] or THEMES.Theme_01
@@ -2362,17 +2211,6 @@ do
         ThemeSystem.SetHubTheme("Theme_07", true)
         updateCustomEditor()
         pushToast("Custom reset to "..src.name,"warn",1.2)
-    end)
-    local cloneCurrentBtn = new("TextButton",{BackgroundColor3=T.panel, Size=UDim2.new(0.5,-4,0,28), Position=UDim2.new(0.5,2,0,0), Text="Clone Current", Font=FONT, TextSize=10, TextColor3=T.text, AutoButtonColor=false, ZIndex=14, Parent=customFrame}) corner(cloneCurrentBtn,8) stroke(cloneCurrentBtn,T.border,1)
-    cloneCurrentBtn.MouseButton1Click:Connect(function()
-        local current = ResolveAppearance()
-        local th = THEMES[current.Theme] or THEMES.Theme_01
-        local clone={}
-        for k,col in pairs(th.colors) do clone[k]=string.format("#%02X%02X%02X", math.floor(col.R*255+0.5), math.floor(col.G*255+0.5), math.floor(col.B*255+0.5)) end
-        hubAppearance.CustomColors = clone
-        ThemeSystem.SetHubTheme("Theme_07", true)
-        updateCustomEditor()
-        pushToast("Cloned from "..th.name,"warn",1.2)
     end)
     local function setCustomVisibility(id)
         customFrame.Visible = (id=="Theme_07")
@@ -2607,7 +2445,7 @@ end
 -- About tab (consolidated: identity, runtime, credits, games, contributions, diagnostics)
 do
     local AboutData={
-        Version="2.2",
+        Version="2.7.2",
         Build="10K-RP",
         SpecialThanks={"Verity team","Fleece Utility","SchizHub v7","Base_Rework","DarkHub","TokkuHub","Contributors"},
         FavoriteGames={
@@ -2625,32 +2463,19 @@ do
     
     local abCard=makeCard("About","Equilibrium — About","UI assets, credits, and build information")
     
-    -- Section helper: centered header, left-aligned content with proper spacing
-    local function makeSection(parent, title, subtitle)
-        new("Frame",{BackgroundTransparency=1, Size=UDim2.new(1,0,0,8), ZIndex=13, Parent=parent})
-        local titleLabel=new("TextLabel",{BackgroundTransparency=1, Size=UDim2.new(1,0,0,16), Font=FONTB, Text=title, TextSize=12, TextColor3=T.text, TextXAlignment=Enum.TextXAlignment.Center, ZIndex=13, Parent=parent})
-        if subtitle then
-            new("TextLabel",{BackgroundTransparency=1, Size=UDim2.new(1,0,0,14), Font=FONT, Text=subtitle, TextSize=10, TextColor3=T.dim, TextXAlignment=Enum.TextXAlignment.Center, TextWrapped=true, ZIndex=13, Parent=parent})
-        end
-        return titleLabel
+    -- Helper to create compact info cards
+    local function makeInfoCard(parent, title, contentText, textSize)
+        textSize = textSize or 10
+        local titleLabel=new("TextLabel",{BackgroundTransparency=1, Size=UDim2.new(1,0,0,13), Font=FONTB, Text=title, TextSize=10, TextColor3=T.text, TextXAlignment=Enum.TextXAlignment.Left, ZIndex=13, Parent=parent})
+        local contentLabel=new("TextLabel",{BackgroundTransparency=1, Size=UDim2.new(1,0,0,0), AutomaticSize=Enum.AutomaticSize.Y, Font=FONT, Text=contentText, TextSize=textSize, TextColor3=T.dim, TextWrapped=true, ZIndex=13, Parent=parent})
+        return titleLabel, contentLabel
     end
     
-    -- Info card helper: creates a card with title and content (centered headers, left-aligned content)
-    local function makeInfoCard(parent, title, content, textSize)
-        new("Frame",{BackgroundTransparency=1, Size=UDim2.new(1,0,0,8), ZIndex=13, Parent=parent})
-        local card=new("Frame",{BackgroundColor3=T.panel, BackgroundTransparency=0.3, Size=UDim2.new(1,0,0,0), AutomaticSize=Enum.AutomaticSize.Y, ZIndex=13, Parent=parent}) corner(card,8) stroke(card,T.border,1) pad(card,12,12,12,12)
-        local titleLabel=new("TextLabel",{BackgroundTransparency=1, Size=UDim2.new(1,0,0,14), Font=FONTB, Text=title, TextSize=11, TextColor3=T.text, TextXAlignment=Enum.TextXAlignment.Center, ZIndex=14, Parent=card})
-        local contentLabel=new("TextLabel",{BackgroundTransparency=1, Size=UDim2.new(1,0,0,0), AutomaticSize=Enum.AutomaticSize.Y, Font=FONT, Text=content, TextSize=textSize or 10, TextColor3=T.subtext, TextXAlignment=Enum.TextXAlignment.Left, TextWrapped=true, ZIndex=14, Parent=card})
-        return card
-    end
-    
-    -- Identity section (card layout)
-    new("Frame",{BackgroundTransparency=1, Size=UDim2.new(1,0,0,12), ZIndex=13, Parent=abCard})
-    local identityCard=new("Frame",{BackgroundColor3=T.panel, BackgroundTransparency=0.5, Size=UDim2.new(1,0,0,0), AutomaticSize=Enum.AutomaticSize.Y, ZIndex=13, Parent=abCard}) corner(identityCard,10) stroke(identityCard,T.border,1) pad(identityCard,14,14,14,14)
-    local idLayout=new("UIListLayout",{SortOrder=Enum.SortOrder.LayoutOrder, Padding=UDim2.fromOffset(0,12), Parent=identityCard})
-    makeSection(identityCard, "BUILD INFO", string.format("Version %s · Build %s", AboutData.Version, AboutData.Build))
+    -- Identity card
     local sig=runtimeSignature()
-    new("TextLabel",{BackgroundTransparency=1, Size=UDim2.new(1,0,0,13), Font=FONT, Text="Runtime Signature: Heartbeats-"..(sig.HeartbeatsObserved or 3), TextSize=10, TextColor3=T.dim, TextXAlignment=Enum.TextXAlignment.Center, ZIndex=13, Parent=identityCard})
+    local identityText=string.format("Version %s | Build %s | RuntimeSignature Heartbeats=%d", 
+        AboutData.Version, AboutData.Build, sig.HeartbeatsObserved or 3)
+    makeInfoCard(abCard, "Identity", identityText, 9)
     
     -- Asset Inserter (kept as functional section above/below About content)
     local assetSeparator=new("Frame",{BackgroundColor3=T.border, BackgroundTransparency=0.5, Size=UDim2.new(1,0,0,1), ZIndex=12, Parent=abCard})
@@ -2818,7 +2643,7 @@ task.delay(0.12,function()
         mount()
         screen.Enabled=true
     end
-    pushToast("Equilibrium v2.2 • Universal Hub", "warn", 2.5)
+    pushToast("Equilibrium v1.1 | Slate 070707 | _ ? | | V puck | ??="..(VerityState.Locked and "locked" or "unlocked"), "warn",4)
     print("[Equilibrium] visible | where="..where.." size="..tostring(shell.AbsoluteSize))
 end)
 
@@ -3957,25 +3782,6 @@ function Verity.Init(parentGui)
     local top=Instance.new("Frame") top.Size=UDim2.new(1,0,0,52); top.BackgroundTransparency=1; top.Parent=root
     local title=Instance.new("TextLabel") title.Size=UDim2.new(1,0,0,22); title.Position=UDim2.new(0,0,0,8); title.BackgroundTransparency=1; title.Text="V E R I T Y"; title.TextSize=22; title.Font=Enum.Font.Code; title.TextColor3=Color3.new(1,1,1); title.Parent=top
     local sub=Instance.new("TextLabel") sub.Size=UDim2.new(1,0,0,14); sub.Position=UDim2.new(0,0,0,28); sub.BackgroundTransparency=1; sub.Text="A S S I S T A N T"; sub.TextSize=9; sub.Font=Enum.Font.Gotham; sub.TextColor3=CONFIG.Gold; sub.Parent=top
-    -- Loading splash for Verity initialization
-    local splashFrame = Instance.new("Frame") splashFrame.Name="LoadingSplash"; splashFrame.Size=UDim2.new(1,0,0,200); splashFrame.Position=UDim2.new(0,0,0,320); splashFrame.BackgroundColor3=CONFIG.Slate; splashFrame.Parent=root Instance.new("UICorner",{CornerRadius=UDim.new(0,12), Parent=splashFrame}) Instance.new("UIStroke",{Color=CONFIG.Gold, Thickness=1, Parent=splashFrame})
-    local splashTitle = Instance.new("TextLabel") splashTitle.Size=UDim2.new(1,0,0,16); splashTitle.Position=UDim2.new(0,0,0,12); splashTitle.BackgroundTransparency=1; splashTitle.Text="Initializing Verity..."; splashTitle.TextSize=11; splashTitle.Font=Enum.Font.GothamBold; splashTitle.TextColor3=CONFIG.Gold; splashTitle.Parent=splashFrame
-    local splashList = {}
-    local function addSplashLine(text)
-        table.insert(splashList, text)
-        local lbl = Instance.new("TextLabel") lbl.Name="SplashLine"..#splashList; lbl.Size=UDim2.new(1,-16,0,14); lbl.Position=UDim2.new(0,8,0,32+(#splashList-1)*16); lbl.BackgroundTransparency=1; lbl.Text="• "..text; lbl.TextSize=9; lbl.Font=Enum.Font.Gotham; lbl.TextColor3=Color3.fromHex("a0a0a8"); lbl.TextXAlignment=Enum.TextXAlignment.Left; lbl.Parent=splashFrame
-    end
-    local function clearSplash()
-        for _,ch in ipairs(splashFrame:GetChildren()) do if ch:IsA("TextLabel") then ch:Destroy() end end
-        splashList = {}
-    end
-    _G.VeritySplash = {Add=addSplashLine, Clear=clearSplash}
-    -- Initial loading messages
-    addSplashLine("Loading knowledge module...")
-    task.delay(0.3, function() addSplashLine("Loading reasoning engine...") end)
-    task.delay(0.6, function() addSplashLine("Building character model...") end)
-    task.delay(0.9, function() addSplashLine("Verity ready") end)
-    task.delay(1.5, function() clearSplash(); splashFrame.Visible=false end)
     -- gear + lock buttons
     local gear=Instance.new("TextButton") gear.Size=UDim2.fromOffset(28,28); gear.Position=UDim2.new(0,8,0,12); gear.Text="?"; gear.Font=Enum.Font.GothamBold; gear.TextSize=14; gear.BackgroundColor3=CONFIG.Slate; gear.TextColor3=CONFIG.Gold; gear.Parent=root Instance.new("UICorner",{CornerRadius=UDim.new(0,8), Parent=gear}) Instance.new("UIStroke",{Color=CONFIG.Gold, Thickness=1, Parent=gear})
     local lockBtn=Instance.new("TextButton") lockBtn.Size=UDim2.fromOffset(28,28); lockBtn.Position=UDim2.new(1,-36,0,12); lockBtn.Text=VerityState.Locked and "??" or "??"; lockBtn.Font=Enum.Font.Gotham; lockBtn.TextSize=12; lockBtn.BackgroundColor3=CONFIG.Slate; lockBtn.TextColor3=CONFIG.Gold; lockBtn.Parent=root Instance.new("UICorner",{CornerRadius=UDim.new(0,8), Parent=lockBtn}) Instance.new("UIStroke",{Color=CONFIG.Gold, Thickness=1, Parent=lockBtn})
