@@ -1,0 +1,17 @@
+- name: Roblox Luau Execution
+  # You may pin to the exact commit or the version.
+  # uses: grand-hawk/action-roblox-luau-execution@803a85ad3491e22ef540ff069b30fd8ef622606d
+  uses: grand-hawk/action-roblox-luau-execution@v1.0.1
+  with:
+    # Roblox Open Cloud API key (string)
+    roblox_api_key: 
+    # Universe id (string)
+    universe_id: 
+    # Place id (string)
+    place_id: 
+    # Luau file to execute (string path)
+    luau_file: 
+    # Output file to write to (string path)
+    output_file: # optional, default is 
+    # Dump output to summary as codeblock (boolean)
+    dump_to_summary: # optional
