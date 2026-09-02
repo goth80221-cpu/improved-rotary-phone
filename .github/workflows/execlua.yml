@@ -1,7 +1,39 @@
-- name: Lua Busted
-  # You may pin to the exact commit or the version.
-  # uses: lunarmodules/busted@56e6d68204d1456afa77f1346bf4e050df65b629
-  uses: lunarmodules/busted@v2.3.0
-  with:
-    # Arguments passed to busted
-    args: # optional, default is .
+name: Lua & Luau CI
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+  lint-and-typecheck:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup StyLua (Formatter)
+        uses: JohnnyMorganz/stylua-action@v4
+        with:
+          version: 0.20.0
+          token: ${{ secrets.GITHUB_TOKEN }}
+          args: --check .
+
+      - name: Install Luau & Selene
+        run: |
+          sudo gh release download --repo Roblox/luau -p "*linux*.tgz" --out luau.tgz
+          tar -xzf luau.tgz
+          sudo mv luau luau-analyze /usr/local/bin/
+          
+          sudo gh release download --repo Kampfkarrren/selene -p "*linux*.zip" --out selene.zip
+          unzip selene.zip
+          sudo mv selene /usr/local/bin/
+
+      - name: Run Selene Linting
+        run: selene .
+
+      - name: Run Luau Analysis
+        run: |
+          find . -name "*.lua" -o -name "*.luau" | xargs luau-analyze
