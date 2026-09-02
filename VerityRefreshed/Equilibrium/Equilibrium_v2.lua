@@ -1,5 +1,6 @@
--- Equilibrium v2.0 COMPILED — single file, no external modules required
+-- Equilibrium v2.1 COMPILED — single file, no external modules required
 -- Major updates: TP Bank file explorer, About tab layout fix, Font changer, Size presets, Text resolution fixes
+-- v2.1 patches: Cleaner load notification, = puck symbol, theme-compatible puck, RBX asset backgrounds, window button polish
 
 -- single-instance cleanup
 pcall(function()
@@ -13,7 +14,7 @@ local Players=game:GetService("Players"); local RunService=game:GetService("RunS
 local TweenService=game:GetService("TweenService"); local Lighting=game:GetService("Lighting"); local HttpService=game:GetService("HttpService")
 local TeleportService=game:GetService("TeleportService"); local GuiService=game:GetService("GuiService"); local Workspace=game:GetService("Workspace")
 local LP=Players.LocalPlayer; local Camera=Workspace.CurrentCamera or Workspace:FindFirstChildOfClass("Camera")
-print("[Equilibrium] boot — "..BRAND.." v2.0 compiling Slate 070707")
+print("[Equilibrium] boot — "..BRAND.." v2.1 initializing")
 
 -- ===== Settings (file+memory, inlined) =====
 local Settings={}; do
@@ -21,11 +22,11 @@ local Settings={}; do
     local function hasFile() return typeof(isfolder)=="function" and typeof(isfile)=="function" and typeof(writefile)=="function" and typeof(readfile)=="function" end
     local function ensure() if not hasFile() then return false end if not isfolder(CFG_FOLDER) then pcall(makefolder,CFG_FOLDER) end if not isfolder(CFG_FOLDER.."/places") then pcall(makefolder,CFG_FOLDER.."/places") end return true end
     local function fpath(k) if k=="global" then return CFG_FOLDER.."/global.json" end return CFG_FOLDER.."/places/"..tostring(game.PlaceId)..".json" end
-    local defaults={global={theme="Slate", bg="#070707", verityLocked=true, winW=620, winH=520, fontSize=12, fontPreset="Default"}, place={features={}}}
+    local defaults={global={theme="Default", bg="#070707", verityLocked=true, winW=620, winH=520, fontSize=12, fontPreset="Default", bgPreset="Slate"}, place={features={}}}
     function Settings:Get(k,s) s=s or "global" local src=mem[s] or {} if src[k]~=nil then return src[k] end return defaults[s] and defaults[s][k] or nil end
     function Settings:Set(k,v,s) s=s or "global" mem[s]=mem[s] or {} mem[s][k]=v end
     function Settings:Save(s) s=s or "global" if hasFile() then ensure() local ok,txt=pcall(HttpService.JSONEncode,HttpService,mem[s] or {}) if ok then pcall(writefile,fpath(s),txt) end end end
-    function Settings:Load() if hasFile() then local ok,txt=pcall(readfile,fpath("global")) if ok then local ok2,d=pcall(HttpService.JSONDecode,HttpService,txt) if ok2 and type(d)=="table" then mem.global=d end end local ok3,txt2=pcall(readfile,fpath("place")) if ok3 then local ok4,d2=pcall(HttpService.JSONDecode,HttpService,txt2) if ok4 and type(d2)=="table" then mem.place=d2 end end end if not mem.global then mem.global={theme="Slate", bg="#070707", verityLocked=true, winW=620, winH=520, fontSize=12, fontPreset="Default"} end if not mem.place then mem.place={features={}} end return mem end
+    function Settings:Load() if hasFile() then local ok,txt=pcall(readfile,fpath("global")) if ok then local ok2,d=pcall(HttpService.JSONDecode,HttpService,txt) if ok2 and type(d)=="table" then mem.global=d end end local ok3,txt2=pcall(readfile,fpath("place")) if ok3 then local ok4,d2=pcall(HttpService.JSONDecode,HttpService,txt2) if ok4 and type(d2)=="table" then mem.place=d2 end end end if not mem.global then mem.global={theme="Default", bg="#070707", verityLocked=true, winW=620, winH=520, fontSize=12, fontPreset="Default", bgPreset="Slate"} end if not mem.place then mem.place={features={}} end return mem end
     pcall(function() Settings:Load() end)
 end
 
@@ -86,8 +87,19 @@ do
 end
 local function alive() return Char.model and Char.model.Parent and Char.hum and Char.hum.Health>0 and Char.root and Char.root.Parent end
 
--- ===== Theme Slate 070707 =====
+-- ===== Theme (configurable background) =====
 local T={bg=Color3.fromHex("070707"), panel=Color3.fromHex("141414"), titleBar=Color3.fromHex("0f0f0f"), border=Color3.fromHex("2a2a2a"), line=Color3.fromHex("252525"), text=Color3.fromHex("e6e6e6"), dim=Color3.fromHex("a0a0a8"), accent=Color3.fromHex("787a96"), accent2=Color3.fromHex("8a8dc2"), on=Color3.fromHex("5fdc82"), off=Color3.fromHex("4b5563"), warn=Color3.fromHex("e81123"), warnHover=Color3.fromHex("c50f1f")}
+-- RBX Asset backgrounds for puck mode
+local RBX_BACKGROUNDS={
+    {name="Slate", assetId="", color="#070707"},
+    {name="Midnight", assetId="rbxassetid://15299118685", color="#0a0f1a"},
+    {name="Ocean", assetId="rbxassetid://15299118892", color="#0d1a24"},
+    {name="Forest", assetId="rbxassetid://15299119103", color="#0f1a12"},
+    {name="Dusk", assetId="rbxassetid://15299119344", color="#1a1420"},
+    {name="Crimson", assetId="rbxassetid://15299119587", color="#1a0f0f"},
+    {name="Nebula", assetId="rbxassetid://15299119821", color="#1a0f1a"},
+    {name="Aurora", assetId="rbxassetid://15299120065", color="#0f1a1a"},
+}
 local FONT_PRESETS={
     Default=Enum.Font.Gotham,
     Gotham=Enum.Font.Gotham,
@@ -208,30 +220,47 @@ lockBtn.Activated:Connect(function() verityLocked=not verityLocked lockBtn.Text=
 Verity.locked=verityLocked
 
 new("TextLabel",{BackgroundTransparency=1, Size=UDim2.new(1,-190,1,0), Position=offset(68,0), Font=FONTB, Text="EQUILIBRIUM", TextSize=getFontSize(13), TextColor3=T.text, TextXAlignment=Enum.TextXAlignment.Left, ZIndex=13, Parent=titleBar})
-new("TextLabel",{BackgroundTransparency=1, Size=UDim2.new(1,-190,1,0), Position=offset(68,14), Font=FONT, Text="Slate • 070707 • Universal", TextSize=getFontSize(9), TextColor3=T.dim, TextXAlignment=Enum.TextXAlignment.Left, ZIndex=13, Parent=titleBar})
+new("TextLabel",{BackgroundTransparency=1, Size=UDim2.new(1,-190,1,0), Position=offset(68,14), Font=FONT, Text="v2.1 • Universal Hub", TextSize=getFontSize(9), TextColor3=T.dim, TextXAlignment=Enum.TextXAlignment.Left, ZIndex=13, Parent=titleBar})
 
 -- Windows buttons _ □ ×
 local winRow=new("Frame",{BackgroundTransparency=1, Size=offset(138,36), AnchorPoint=Vector2.new(1,0), Position=UDim2.new(1,0,0,0), ZIndex=13, Parent=titleBar}) hlist(winRow,0)
 local function winBtn(txt,isClose)
-    local b=new("TextButton",{BackgroundColor3=T.titleBar, Size=offset(46,36), Text=txt, Font=FONT, TextSize=isClose and getFontSize(16) or getFontSize(12), TextColor3=T.dim, AutoButtonColor=false, BorderSizePixel=0, ZIndex=13, Parent=winRow})
+    local b=new("TextButton",{BackgroundColor3=T.titleBar, Size=offset(46,36), Text=txt, Font=FONTB, TextSize=isClose and getFontSize(18) or getFontSize(14), TextColor3=T.dim, AutoButtonColor=false, BorderSizePixel=0, ZIndex=13, Parent=winRow})
     if isClose then b.MouseEnter:Connect(function() b.BackgroundColor3=T.warn; b.TextColor3=Color3.new(1,1,1) end) b.MouseLeave:Connect(function() b.BackgroundColor3=T.titleBar; b.TextColor3=T.dim end)
     else b.MouseEnter:Connect(function() b.BackgroundColor3=T.border; b.TextColor3=T.text end) b.MouseLeave:Connect(function() b.BackgroundColor3=T.titleBar; b.TextColor3=T.dim end) end
     b.MouseButton1Down:Connect(function() b.BackgroundColor3 = isClose and T.warnHover or T.border end)
     return b
 end
-local btnMin=winBtn("—",false); local btnMax=winBtn("□",false); local btnClose=winBtn("×",true)
+local btnMin=winBtn("_",false); local btnMax=winBtn("□",false); local btnClose=winBtn("×",true)
 do local hold,holdT
     btnClose.MouseButton1Down:Connect(function() hold=true holdT=tick() task.spawn(function() while hold and tick()-holdT<0.9 do task.wait(0.05) end if hold and tick()-holdT>=0.9 then hold=false btnClose.Text="…"; task.wait(0.18) local fn=getgenv()[UNLOAD_KEY] if fn then pcall(fn) end btnClose.Text="×" end end) end)
     btnClose.MouseButton1Up:Connect(function() if not hold then return end local d=tick()-holdT hold=false btnClose.Text="×" if d<0.9 then tw(canvas,TweenInfo.new(0.16),{GroupTransparency=1}).Completed:Wait() screen.Enabled=false canvas.GroupTransparency=0 pushToast("Hidden — RightShift to restore","warn",2) end end)
     btnClose.MouseLeave:Connect(function() hold=false btnClose.Text="×" end)
 end
 
--- Puck V
+-- Puck (= sign, theme-compatible)
 local PUCK=56
 local puck=new("TextButton",{BackgroundColor3=T.panel, Size=offset(PUCK,PUCK), Position=offset(centeredPos(PUCK,PUCK).X,centeredPos(PUCK,PUCK).Y), Text="", AutoButtonColor=false, BorderSizePixel=0, Visible=false, ZIndex=40, Parent=screen}) corner(puck,16) stroke(puck,T.border,1)
 rootMaid:give(puck)
-new("TextLabel",{BackgroundTransparency=1, Size=UDim2.fromScale(1,1), Font=FONTB, Text="V", TextSize=getFontSize(22), TextColor3=T.text, ZIndex=41, Parent=puck})
+local puckLabel=new("TextLabel",{BackgroundTransparency=1, Size=UDim2.fromScale(1,1), Font=FONTB, Text="=", TextSize=getFontSize(22), TextColor3=T.text, ZIndex=41, Parent=puck})
 local puckDot=new("Frame",{BackgroundColor3=T.on, Size=offset(10,10), Position=UDim2.new(1,-8,0,-2), Visible=false, ZIndex=42, Parent=puck}) corner(puckDot,5)
+-- Puck mode: image background option
+local puckMode="symbol" -- "symbol" or "image"
+local currentBgPreset=Settings:Get("bgPreset","global") or "Slate"
+local function applyPuckTheme()
+    local bgInfo=RBX_BACKGROUNDS[1]
+    for _,bg in ipairs(RBX_BACKGROUNDS) do if bg.name==currentBgPreset then bgInfo=bg break end end
+    puck.BackgroundColor3=Color3.fromHex(bgInfo.color)
+    puckLabel.TextColor3=T.text
+    if puckMode=="image" and bgInfo.assetId~="" then
+        -- Try to load image (will fail gracefully in most executors)
+        pcall(function()
+            local img=new("ImageLabel",{Image=bgInfo.assetId, Size=UDim2.fromScale(1,1), ScaleType=Enum.ScaleType.Crop, TileSize=UDim2.fromOffset(128,128), BackgroundTransparency=1, ZIndex=40, Parent=puck})
+            new("UICorner",{CornerRadius=UDim.new(0,16), Parent=img})
+        end)
+    end
+end
+applyPuckTheme()
 local minimized=false; local animating=false; local isMax=false; local savedRect={pos=shellRect.pos, size=shellRect.size}
 local function doMinimize() if minimized or animating then return end animating=true minimized=true shellRect.pos=Vector2.new(shell.Position.X.Offset,shell.Position.Y.Offset) shellRect.size=Vector2.new(shell.AbsoluteSize.X,shell.AbsoluteSize.Y) local t=tw(canvas,TweenInfo.new(0.14),{GroupTransparency=1}) t.Completed:Wait() shell.Visible=false canvas.GroupTransparency=0 local vp=viewport() local p=Vector2.new(math.clamp(shellRect.pos.X+shellRect.size.X/2-PUCK/2,0,vp.X-PUCK), math.clamp(shellRect.pos.Y+shellRect.size.Y/2-PUCK/2,0,vp.Y-PUCK)) puck.Position=offset(p.X,p.Y) puck.Visible=true animating=false end
 local function doRestore() if not minimized or animating then return end animating=true minimized=false puck.Visible=false shell.Visible=true local t=tw(canvas,TweenInfo.new(0.22),{GroupTransparency=0}) t.Completed:Wait() animating=false end
@@ -365,7 +394,7 @@ do
     local buildSection = new("Frame",{BackgroundTransparency=1, Size=UDim2.new(1,0,0,0), AutomaticSize=Enum.AutomaticSize.Y, ZIndex=13, Parent=aboutCard})
     vlist(buildSection, 8)
     new("TextLabel",{BackgroundTransparency=1, Size=UDim2.new(1,0,0,getFontSize(14)), Font=FONTB, Text="BUILD INFO", TextSize=getFontSize(12), TextColor3=T.text, TextXAlignment=Enum.TextXAlignment.Center, ZIndex=14, Parent=buildSection})
-    new("TextLabel",{BackgroundTransparency=1, Size=UDim2.new(1,0,0,getFontSize(28)), Font=FONT, Text="Version 2.0 · Build Equilibrium\nRuntime Signature: Heartbeats-2", TextSize=getFontSize(11), TextColor3=T.dim, TextXAlignment=Enum.TextXAlignment.Center, TextWrapped=true, ZIndex=14, Parent=buildSection})
+    new("TextLabel",{BackgroundTransparency=1, Size=UDim2.new(1,0,0,getFontSize(28)), Font=FONT, Text="Version 2.1 · Build Equilibrium\nRuntime Signature: Heartbeats-2", TextSize=getFontSize(11), TextColor3=T.dim, TextXAlignment=Enum.TextXAlignment.Center, TextWrapped=true, ZIndex=14, Parent=buildSection})
     
     -- Identity Section
     local identityCard = new("Frame",{BackgroundColor3=T.bg, Size=UDim2.new(1,0,0,0), AutomaticSize=Enum.AutomaticSize.Y, BorderSizePixel=0, ZIndex=13, Parent=aboutCard})
@@ -616,7 +645,7 @@ task.delay(0.12,function()
         mount()
         screen.Enabled=true
     end
-    pushToast("Equilibrium v2.0 — Slate 070707 • _ □ × • V puck • 🔒="..(verityLocked and "locked" or "unlocked"), "warn",4)
+    pushToast("Equilibrium v2.1 — Universal Hub • _ □ × • = puck • 🔒="..(verityLocked and "locked" or "unlocked"), "warn",4)
     print("[Equilibrium] visible — where="..where.." size="..tostring(shell.AbsoluteSize))
 end)
 
@@ -624,4 +653,334 @@ end)
 EVENTS.on("verityLog",function() if minimized then puckDot.Visible=true task.delay(4,function() puckDot.Visible=false end) end end)
 
 
--- ===== TP BANK (File Explorer Style) =====
+-- ===== TP BANK (File Explorer Style with Folders) =====
+do
+    local tpCard = makeCard("Teleport", "TP Bank", "12 slots • Position + LookVector • Instant")
+    
+    -- Data model
+    local MAX_SLOTS = 12
+    local positions = {}
+    local folders = {}
+    
+    local function saveData()
+        local data = {positions = positions, folders = folders}
+        local ok, json = pcall(HttpService.JSONEncode, HttpService, data)
+        if ok and typeof(writefile) == "function" then
+            pcall(writefile, CFG_FOLDER .. "/tpbank.json", json)
+        end
+    end
+    
+    local function loadData()
+        if typeof(readfile) == "function" and typeof(isfile) == "function" and isfile(CFG_FOLDER .. "/tpbank.json") then
+            local ok, json = pcall(readfile, CFG_FOLDER .. "/tpbank.json")
+            if ok then
+                local ok2, data = pcall(HttpService.JSONDecode, HttpService, json)
+                if ok2 and type(data) == "table" then
+                    positions = data.positions or {}
+                    folders = data.folders or {}
+                end
+            end
+        end
+    end
+    loadData()
+    
+    local function serialize(cf)
+        local p = cf.Position
+        local l = cf.LookVector
+        return {x = p.X, y = p.Y, z = p.Z, lx = l.X, ly = l.Y, lz = l.Z}
+    end
+    
+    local function deserialize(d)
+        local p = Vector3.new(d.x or 0, d.y or 0, d.z or 0)
+        local l = Vector3.new(d.lx or 0, d.ly or 0, d.lz or 1)
+        return CFrame.new(p, p + l)
+    end
+    
+    -- Export button in header area
+    local exportBtn = new("TextButton",{BackgroundColor3=T.panel, Size=UDim2.new(0,60,0,24), Text="Export", Font=FONT, TextSize=getFontSize(10), TextColor3=T.text, AutoButtonColor=false, ZIndex=14, Parent=tpCard})
+    corner(exportBtn, 7) pad(exportBtn, 0, 0, 8, 8)
+    exportBtn.Position = UDim2.new(1, -70, 0, 8)
+    exportBtn.Activated:Connect(function()
+        local data = {version = 1, exportedAt = os.time(), folders = folders, positions = positions}
+        local ok, json = pcall(HttpService.JSONEncode, HttpService, data)
+        if ok then
+            local out = "-- TP Bank Export\n-- PlaceId: " .. tostring(game.PlaceId) .. "\nreturn " .. json
+            if typeof(setclipboard) == "function" then
+                pcall(setclipboard, out)
+                pushToast("Exported " .. #positions .. " positions to clipboard", "warn", 1.6)
+            else
+                print(out)
+                pushToast("Exported to console (F9)", "warn", 1.6)
+            end
+        end
+    end)
+    
+    -- Coordinate input row
+    local coordRow = new("Frame",{BackgroundTransparency=1, Size=UDim2.new(1,0,0,32), ZIndex=13, Parent=tpCard})
+    hlist(coordRow, 6)
+    local xBox = new("TextBox",{BackgroundColor3=T.bg, Size=UDim2.new(0.25,-4,1,0), Font=FONT, Text="", PlaceholderText="X", PlaceholderColor3=T.dim, TextSize=getFontSize(11), TextColor3=T.text, ClearTextOnFocus=false, ZIndex=14, Parent=coordRow})
+    corner(xBox, 8) stroke(xBox, T.border) pad(xBox, 0, 0, 8, 8)
+    local yBox = new("TextBox",{BackgroundColor3=T.bg, Size=UDim2.new(0.25,-4,1,0), Font=FONT, Text="", PlaceholderText="Y", PlaceholderColor3=T.dim, TextSize=getFontSize(11), TextColor3=T.text, ClearTextOnFocus=false, ZIndex=14, Parent=coordRow})
+    corner(yBox, 8) stroke(yBox, T.border) pad(yBox, 0, 0, 8, 8)
+    local zBox = new("TextBox",{BackgroundColor3=T.bg, Size=UDim2.new(0.25,-4,1,0), Font=FONT, Text="", PlaceholderText="Z", PlaceholderColor3=T.dim, TextSize=getFontSize(11), TextColor3=T.text, ClearTextOnFocus=false, ZIndex=14, Parent=coordRow})
+    corner(zBox, 8) stroke(zBox, T.border) pad(zBox, 0, 0, 8, 8)
+    local goBtn = new("TextButton",{BackgroundColor3=T.accent, Size=UDim2.new(0.25,-2,1,0), Text="Go", Font=FONTB, TextSize=getFontSize(11), TextColor3=T.text, AutoButtonColor=false, ZIndex=14, Parent=coordRow})
+    corner(goBtn, 8)
+    goBtn.Activated:Connect(function()
+        if not alive() then pushToast("No character", "warn") return end
+        local x = tonumber(xBox.Text) or Char.root.Position.X
+        local y = tonumber(yBox.Text) or Char.root.Position.Y
+        local z = tonumber(zBox.Text) or Char.root.Position.Z
+        Char.root.CFrame = CFrame.new(Vector3.new(x, y, z))
+        pushToast("Teleported to " .. x .. ", " .. y .. ", " .. z, "warn", 1.4)
+    end)
+    
+    -- Import row
+    local importRow = new("Frame",{BackgroundTransparency=1, Size=UDim2.new(1,0,0,32), ZIndex=13, Parent=tpCard})
+    hlist(importRow, 6)
+    local importBox = new("TextBox",{BackgroundColor3=T.bg, Size=UDim2.new(1,-70,1,0), Font=FONT, Text="", PlaceholderText="Paste JSON here", PlaceholderColor3=T.dim, TextSize=getFontSize(11), TextColor3=T.text, ClearTextOnFocus=false, ZIndex=14, Parent=importRow})
+    corner(importBox, 8) stroke(importBox, T.border) pad(importBox, 0, 0, 8, 8)
+    local importBtn = new("TextButton",{BackgroundColor3=T.panel, Size=UDim2.new(0,64,1,0), Text="Import", Font=FONT, TextSize=getFontSize(11), TextColor3=T.text, AutoButtonColor=false, ZIndex=14, Parent=importRow})
+    corner(importBtn, 8) stroke(importBtn, T.border)
+    importBtn.Activated:Connect(function()
+        local ok, data = pcall(HttpService.JSONDecode, HttpService, importBox.Text)
+        if not ok then pushToast("Invalid JSON", "bad") return end
+        local importedPositions = data.positions or {}
+        local importedFolders = data.folders or {}
+        for _,f in ipairs(importedFolders) do
+            local exists = false
+            for _,ef in ipairs(folders) do if ef.id == f.id then exists = true break end end
+            if not exists then table.insert(folders, f) end
+        end
+        for _,p in ipairs(importedPositions) do
+            if #positions >= MAX_SLOTS then break end
+            local validFolderId = nil
+            if p.folderId then
+                for _,f in ipairs(folders) do if f.id == p.folderId then validFolderId = p.folderId break end end
+            end
+            table.insert(positions, {id = p.id or ("pos-" .. tostring(tick())), name = p.name or "Imported", x = p.x or 0, y = p.y or 0, z = p.z or 0, folderId = validFolderId, createdAt = p.createdAt or os.time(), updatedAt = os.time()})
+        end
+        saveData()
+        refreshTree()
+        pushToast("Imported " .. #importedPositions .. " positions", "warn", 1.4)
+    end)
+    
+    -- Current coordinates display
+    local currentCoordFrame = new("Frame",{BackgroundColor3=T.bg, Size=UDim2.new(1,0,0,40), ZIndex=13, Parent=tpCard})
+    corner(currentCoordFrame, 8) stroke(currentCoordFrame, T.border) pad(currentCoordFrame, 8, 8, 10, 10)
+    local currentCoordLabel = new("TextLabel",{BackgroundTransparency=1, Size=UDim2.new(1,-60,1,0), Font=FONT, Text="Current: 0, 0, 0", TextSize=getFontSize(11), TextColor3=T.dim, TextXAlignment=Enum.TextXAlignment.Left, ZIndex=14, Parent=currentCoordFrame})
+    local saveCurrentBtn = new("TextButton",{BackgroundColor3=T.accent, Size=offset(50,24), Position=UDim2.new(1,-55,0.5,-12), Text="Save", Font=FONTB, TextSize=getFontSize(10), TextColor3=T.text, AutoButtonColor=false, ZIndex=14, Parent=currentCoordFrame})
+    corner(saveCurrentBtn, 6)
+    
+    -- Update current coords periodically
+    local function updateCurrentCoords()
+        if alive() then
+            local p = Char.root.Position
+            currentCoordLabel.Text = string.format("Current: %.2f, %.2f, %.2f", p.X, p.Y, p.Z)
+        end
+    end
+    rootMaid:give(RunService.Heartbeat:Connect(updateCurrentCoords))
+    
+    -- Save dialog
+    local saveDialogVisible = false
+    local function showSaveDialog()
+        if saveDialogVisible then return end
+        if not alive() then pushToast("No character", "warn") return end
+        if #positions >= MAX_SLOTS then pushToast("TP Bank full (12 max)", "warn") return end
+        saveDialogVisible = true
+        
+        local overlay = new("Frame",{BackgroundColor3=Color3.fromRGB(0,0,0), BackgroundTransparency=0.5, Size=UDim2.fromScale(1,1), Visible=true, ZIndex=50, Parent=screen})
+        local dialog = new("Frame",{BackgroundColor3=T.panel, Size=offset(280,140), Position=UDim2.new(0.5,0,0.5,0), AnchorPoint=Vector2.new(0.5,0.5), ZIndex=51, Parent=overlay})
+        corner(dialog, 12) stroke(dialog, T.border) pad(dialog, 12, 12, 12, 12) vlist(dialog, 8)
+        
+        new("TextLabel",{BackgroundTransparency=1, Size=UDim2.new(1,0,0,16), Font=FONTB, Text="Save Current Position", TextSize=getFontSize(12), TextColor3=T.text, ZIndex=52, Parent=dialog})
+        
+        local nameBox = new("TextBox",{BackgroundColor3=T.bg, Size=UDim2.new(1,0,0,28), Font=FONT, Text="Position " .. (#positions + 1), PlaceholderText="Name", PlaceholderColor3=T.dim, TextSize=getFontSize(11), TextColor3=T.text, ClearTextOnFocus=false, ZIndex=52, Parent=dialog})
+        corner(nameBox, 8) stroke(nameBox, T.border) pad(nameBox, 0, 0, 8, 8)
+        
+        local folderSelect = new("Frame",{BackgroundTransparency=1, Size=UDim2.new(1,0,0,28), ZIndex=52, Parent=dialog})
+        vlist(folderSelect, 4)
+        new("TextLabel",{BackgroundTransparency=1, Size=UDim2.new(1,0,0,14), Font=FONT, Text="Folder (optional)", TextSize=getFontSize(9), TextColor3=T.dim, ZIndex=53, Parent=folderSelect})
+        local folderDropdown = new("TextButton",{BackgroundColor3=T.bg, Size=UDim2.new(1,0,1,0), Text="Root", Font=FONT, TextSize=getFontSize(10), TextColor3=T.text, AutoButtonColor=false, ZIndex=53, Parent=folderSelect})
+        corner(folderDropdown, 6) stroke(folderDropdown, T.border) pad(folderDropdown, 0, 0, 8, 8)
+        
+        local btnRow = new("Frame",{BackgroundTransparency=1, Size=UDim2.new(1,0,0,28), ZIndex=52, Parent=dialog})
+        hlist(btnRow, 6)
+        local cancelBtn = new("TextButton",{BackgroundColor3=T.panel, Size=UDim2.new(0.5,-3,1,0), Text="Cancel", Font=FONT, TextSize=getFontSize(11), TextColor3=T.text, AutoButtonColor=false, ZIndex=53, Parent=btnRow})
+        corner(cancelBtn, 6) stroke(cancelBtn, T.border)
+        local confirmBtn = new("TextButton",{BackgroundColor3=T.accent, Size=UDim2.new(0.5,-3,1,0), Text="Save Position", Font=FONTB, TextSize=getFontSize(11), TextColor3=T.text, AutoButtonColor=false, ZIndex=53, Parent=btnRow})
+        corner(confirmBtn, 6)
+        
+        local selectedFolderId = nil
+        folderDropdown.Activated:Connect(function()
+            -- Toggle folder selection (simplified)
+            local opts = {"Root"}
+            for _,f in ipairs(folders) do table.insert(opts, f.name) end
+            local idx = table.find(opts, folderDropdown.Text) or 1
+            idx = (idx % #opts) + 1
+            if idx == 1 then
+                folderDropdown.Text = "Root"
+                selectedFolderId = nil
+            else
+                folderDropdown.Text = opts[idx]
+                selectedFolderId = folders[idx-1].id
+            end
+        end)
+        
+        local function close()
+            saveDialogVisible = false
+            overlay:Destroy()
+        end
+        
+        cancelBtn.Activated:Connect(close)
+        confirmBtn.Activated:Connect(function()
+            local p = Char.root.Position
+            local newPos = {
+                id = "pos-" .. tostring(tick()),
+                name = nameBox.Text ~= "" and nameBox.Text or ("Position " .. (#positions + 1)),
+                x = Number(p.X.toFixed(2)),
+                y = Number(p.Y.toFixed(2)),
+                z = Number(p.Z.toFixed(2)),
+                folderId = selectedFolderId,
+                createdAt = os.time(),
+                updatedAt = os.time()
+            }
+            table.insert(positions, newPos)
+            saveData()
+            refreshTree()
+            pushToast("Saved " .. newPos.name, "warn", 1.2)
+            close()
+        end)
+        
+        nameBox:CaptureFocus()
+    end
+    
+    saveCurrentBtn.Activated:Connect(showSaveDialog)
+    
+    -- Tree view container
+    local treeHolder = new("ScrollingFrame",{BackgroundTransparency=1, Size=UDim2.new(1,0,0,180), BorderSizePixel=0, ScrollBarThickness=4, ScrollBarImageColor3=T.border, CanvasSize=UDim2.new(0,0,0,0), AutomaticCanvasSize=Enum.AutomaticSize.Y, ScrollingDirection=Enum.ScrollingDirection.Y, ZIndex=13, Parent=tpCard})
+    local treeLayout = new("UIListLayout",{SortOrder=Enum.SortOrder.LayoutOrder, Padding=UDim.new(0,4), Parent=treeHolder})
+    pad(treeHolder, 4, 4, 4, 4)
+    
+    local expandedFolders = {}
+    
+    local function refreshTree()
+        for _,c in ipairs(treeHolder:GetChildren()) do if c:IsA("GuiObject") and c.Name~=treeLayout.Name and c.Name~="UIPadding" then c:Destroy() end end
+        
+        local usageLabel = new("TextLabel",{BackgroundTransparency=1, Size=UDim2.new(1,0,0,16), Font=FONTB, Text="SAVED POSITIONS  " .. #positions .. " / " .. MAX_SLOTS .. " used", TextSize=getFontSize(10), TextColor3=T.dim, TextXAlignment=Enum.TextXAlignment.Right, ZIndex=13, Parent=tpCard})
+        usageLabel.Position = UDim2.new(0, 10, 0, treeHolder.Position.Y.Offset - 20)
+        
+        -- Root positions section
+        local rootSection = new("Frame",{BackgroundTransparency=1, Size=UDim2.new(1,0,0,0), AutomaticSize=Enum.AutomaticSize.Y, ZIndex=14, Parent=treeHolder})
+        vlist(rootSection, 2)
+        local rootHeader = new("Frame",{BackgroundColor3=T.bg, Size=UDim2.new(1,0,0,26), ZIndex=15, Parent=rootSection})
+        corner(rootHeader, 6) stroke(rootHeader, T.border) pad(rootHeader, 0, 0, 8, 8)
+        hlist(rootHeader, 6, Enum.VerticalAlignment.Center)
+        new("TextLabel",{BackgroundTransparency=1, Size=UDim2.new(1,-30,1,0), Font=FONTB, Text="⠿  Root positions", TextSize=getFontSize(10), TextColor3=T.text, TextXAlignment=Enum.TextXAlignment.Left, ZIndex=16, Parent=rootHeader})
+        local addBtn = new("TextButton",{BackgroundColor3=T.panel, Size=offset(22,22), Text="+", Font=FONTB, TextSize=getFontSize(12), TextColor3=T.text, AutoButtonColor=false, ZIndex=16, Parent=rootHeader})
+        corner(addBtn, 5)
+        addBtn.Activated:Connect(showSaveDialog)
+        
+        local rootPositions = {}
+        for _,p in ipairs(positions) do if p.folderId == nil then table.insert(rootPositions, p) end end
+        
+        for i,p in ipairs(rootPositions) do
+            local posCard = new("Frame",{BackgroundColor3=T.bg, Size=UDim2.new(1,0,0,0), AutomaticSize=Enum.AutomaticSize.Y, ZIndex=15, Parent=rootSection})
+            corner(posCard, 6) stroke(posCard, T.border) pad(posCard, 6, 6, 8, 8)
+            local posHeader = new("Frame",{BackgroundTransparency=1, Size=UDim2.new(1,0,0,20), ZIndex=16, Parent=posCard})
+            hlist(posHeader, 4, Enum.VerticalAlignment.Center)
+            new("TextLabel",{BackgroundTransparency=1, Size=UDim2.new(1,-50,1,0), Font=FONTB, Text="⠿  " .. p.name, TextSize=getFontSize(10), TextColor3=T.text, TextXAlignment=Enum.TextXAlignment.Left, ZIndex=17, Parent=posHeader})
+            local delBtn = new("TextButton",{BackgroundColor3=T.panel, Size=offset(20,20), Text="×", Font=FONTB, TextSize=getFontSize(11), TextColor3=T.dim, AutoButtonColor=false, ZIndex=17, Parent=posHeader})
+            corner(delBtn, 4)
+            delBtn.Activated:Connect(function()
+                table.remove(positions, table.find(positions, p))
+                saveData()
+                refreshTree()
+                pushToast("Deleted " .. p.name, "warn", 1.2)
+            end)
+            new("TextLabel",{BackgroundTransparency=1, Size=UDim2.new(1,0,0,16), Font=FONT, Text=string.format("    X %.2f · Y %.2f · Z %.2f", p.x, p.y, p.z), TextSize=getFontSize(9), TextColor3=T.dim, TextXAlignment=Enum.TextXAlignment.Left, ZIndex=16, Parent=posCard})
+            local goPosBtn = new("TextButton",{BackgroundColor3=T.accent, Size=offset(40,18), Position=UDim2.new(1,-45,0,2), Text="Go", Font=FONTB, TextSize=getFontSize(9), TextColor3=T.text, AutoButtonColor=false, ZIndex=17, Parent=posCard})
+            corner(goPosBtn, 4)
+            goPosBtn.Activated:Connect(function()
+                if not alive() then pushToast("No character", "warn") return end
+                Char.root.CFrame = CFrame.new(Vector3.new(p.x, p.y, p.z))
+                pushToast("Teleported to " .. p.name, "warn", 1.4)
+            end)
+        end
+        
+        -- Folders section
+        for _,f in ipairs(folders) do
+            local folderFrame = new("Frame",{BackgroundTransparency=1, Size=UDim2.new(1,0,0,0), AutomaticSize=Enum.AutomaticSize.Y, ZIndex=14, Parent=treeHolder})
+            vlist(folderFrame, 2)
+            
+            local folderHeader = new("Frame",{BackgroundColor3=T.bg, Size=UDim2.new(1,0,0,28), ZIndex=15, Parent=folderFrame})
+            corner(folderHeader, 6) stroke(folderHeader, T.border) pad(folderHeader, 0, 0, 8, 8)
+            hlist(folderHeader, 6, Enum.VerticalAlignment.Center)
+            
+            local expandBtn = new("TextButton",{BackgroundTransparency=1, Size=offset(18,18), Text=expandedFolders[f.id] and "▾" or "▸", Font=FONTB, TextSize=getFontSize(11), TextColor3=T.text, AutoButtonColor=false, ZIndex=16, Parent=folderHeader})
+            expandBtn.Activated:Connect(function()
+                expandedFolders[f.id] = not expandedFolders[f.id]
+                refreshTree()
+            end)
+            
+            new("TextLabel",{BackgroundTransparency=1, Size=UDim2.new(1,-60,1,0), Font=FONTB, Text="📁 " .. f.name, TextSize=getFontSize(10), TextColor3=T.text, TextXAlignment=Enum.TextXAlignment.Left, ZIndex=16, Parent=folderHeader})
+            
+            local folderDelBtn = new("TextButton",{BackgroundColor3=T.panel, Size=offset(22,22), Text="[⋮]", Font=FONT, TextSize=getFontSize(10), TextColor3=T.dim, AutoButtonColor=false, ZIndex=16, Parent=folderHeader})
+            corner(folderDelBtn, 5)
+            folderDelBtn.Activated:Connect(function()
+                -- Delete folder, move contents to root
+                for _,p in ipairs(positions) do if p.folderId == f.id then p.folderId = nil end end
+                table.remove(folders, table.find(folders, f))
+                saveData()
+                refreshTree()
+                pushToast("Deleted folder " .. f.name, "warn", 1.2)
+            end)
+            
+            if expandedFolders[f.id] then
+                local folderPositions = {}
+                for _,p in ipairs(positions) do if p.folderId == f.id then table.insert(folderPositions, p) end end
+                
+                for _,p in ipairs(folderPositions) do
+                    local posCard = new("Frame",{BackgroundColor3=T.panel, Size=UDim2.new(1,0,0,0), AutomaticSize=Enum.AutomaticSize.Y, ZIndex=15, Parent=folderFrame})
+                    corner(posCard, 6) stroke(posCard, T.border) pad(posCard, 6, 6, 8, 8)
+                    new("TextLabel",{BackgroundTransparency=1, Size=UDim2.new(1,-40,1,0), Font=FONTB, Text="    ⠿ " .. p.name, TextSize=getFontSize(10), TextColor3=T.text, TextXAlignment=Enum.TextXAlignment.Left, ZIndex=16, Parent=posCard})
+                    new("TextLabel",{BackgroundTransparency=1, Size=UDim2.new(1,0,0,16), Font=FONT, Text=string.format("        X %.2f · Y %.2f · Z %.2f", p.x, p.y, p.z), TextSize=getFontSize(9), TextColor3=T.dim, TextXAlignment=Enum.TextXAlignment.Left, ZIndex=16, Parent=posCard})
+                    local goPosBtn = new("TextButton",{BackgroundColor3=T.accent, Size=offset(36,16), Position=UDim2.new(1,-40,0,2), Text="Go", Font=FONTB, TextSize=getFontSize(8), TextColor3=T.text, AutoButtonColor=false, ZIndex=17, Parent=posCard})
+                    corner(goPosBtn, 4)
+                    goPosBtn.Activated:Connect(function()
+                        if not alive() then pushToast("No character", "warn") return end
+                        Char.root.CFrame = CFrame.new(Vector3.new(p.x, p.y, p.z))
+                        pushToast("Teleported to " .. p.name, "warn", 1.4)
+                    end)
+                end
+            end
+        end
+        
+        if #positions == 0 then
+            new("TextLabel",{BackgroundTransparency=1, Size=UDim2.new(1,0,0,32), Font=FONT, Text="No saved positions yet.\nSave your current coordinates to create your first position.", TextSize=getFontSize(10), TextColor3=T.dim, TextXAlignment=Enum.TextXAlignment.Center, TextWrapped=true, ZIndex=14, Parent=treeHolder})
+        end
+    end
+    
+    -- Create folder button
+    local createFolderBtn = new("TextButton",{BackgroundColor3=T.panel, Size=UDim2.new(0.5,-4,0,28), Text="Create folder", Font=FONT, TextSize=getFontSize(10), TextColor3=T.text, AutoButtonColor=false, ZIndex=14, Parent=tpCard})
+    corner(createFolderBtn, 8) stroke(createFolderBtn, T.border)
+    createFolderBtn.Activated:Connect(function()
+        table.insert(folders, {id = "folder-" .. tostring(tick()), name = "Folder " .. (#folders + 1), parentId = nil, expanded = false, createdAt = os.time()})
+        saveData()
+        refreshTree()
+        pushToast("Created folder", "warn", 1.2)
+    end)
+    
+    local resetBtn = new("TextButton",{BackgroundColor3=T.warn, Size=UDim2.new(0.5,-4,0,28), Text="Reset TP Bank", Font=FONT, TextSize=getFontSize(10), TextColor3=Color3.new(1,1,1), AutoButtonColor=false, ZIndex=14, Parent=tpCard})
+    corner(resetBtn, 8)
+    resetBtn.Position = UDim2.new(0.5, 2, 0, createFolderBtn.Position.Y.Offset)
+    resetBtn.Activated:Connect(function()
+        positions = {}
+        folders = {}
+        saveData()
+        refreshTree()
+        pushToast("TP Bank reset", "warn", 1.2)
+    end)
+    
+    refreshTree()
+end
