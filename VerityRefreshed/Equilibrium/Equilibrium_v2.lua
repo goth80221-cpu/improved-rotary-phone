@@ -386,65 +386,436 @@ for _,cat in ipairs(TABS) do for _,def in ipairs(catMap[cat] or {}) do
     if def.actions then for _,a in ipairs(def.actions) do local btn=new("TextButton",{BackgroundColor3=T.panel, Size=UDim2.new(1,0,0,28), Text=a.text, Font=FONT, TextSize=getFontSize(12), TextColor3=T.text, AutoButtonColor=false, ZIndex=14, Parent=card}) corner(btn,8) stroke(btn,T.border) btn.Activated:Connect(function() pcall(a.run) end) end end
 end end
 
--- ===== ABOUT TAB (Fixed layout - vertical document flow) =====
+-- ===== ABOUT TAB (Rebuilt with vertical ScrollingFrame + UIListLayout) =====
 do
-    local aboutCard = makeCard("About", "Equilibrium", "UI assets, credits, and build information")
+    -- Create main scrolling container for the About tab
+    local aboutScroll = new("ScrollingFrame", {
+        Name = "AboutContent",
+        BackgroundTransparency = 1,
+        Size = UDim2.new(1, 0, 1, 0),
+        Position = UDim2.new(0, 0, 0, 0),
+        BorderSizePixel = 0,
+        ScrollBarThickness = 4,
+        ScrollBarImageColor3 = T.border,
+        CanvasSize = UDim2.fromOffset(0, 0),
+        AutomaticCanvasSize = Enum.AutomaticSize.Y,
+        ScrollingDirection = Enum.ScrollingDirection.Y,
+        ZIndex = 12,
+        Parent = page
+    })
+    pad(aboutScroll, 16, 16, 16, 16)
+    vlist(aboutScroll, 10)
     
-    -- Build Info Section
-    local buildSection = new("Frame",{BackgroundTransparency=1, Size=UDim2.new(1,0,0,0), AutomaticSize=Enum.AutomaticSize.Y, ZIndex=13, Parent=aboutCard})
-    vlist(buildSection, 8)
-    new("TextLabel",{BackgroundTransparency=1, Size=UDim2.new(1,0,0,getFontSize(14)), Font=FONTB, Text="BUILD INFO", TextSize=getFontSize(12), TextColor3=T.text, TextXAlignment=Enum.TextXAlignment.Center, ZIndex=14, Parent=buildSection})
-    new("TextLabel",{BackgroundTransparency=1, Size=UDim2.new(1,0,0,getFontSize(28)), Font=FONT, Text="Version 2.1 · Build Equilibrium\nRuntime Signature: Heartbeats-2", TextSize=getFontSize(11), TextColor3=T.dim, TextXAlignment=Enum.TextXAlignment.Center, TextWrapped=true, ZIndex=14, Parent=buildSection})
+    -- Header Section
+    local headerSection = new("Frame", {
+        BackgroundTransparency = 1,
+        Size = UDim2.new(1, 0, 0, 0),
+        AutomaticSize = Enum.AutomaticSize.Y,
+        ZIndex = 13,
+        Parent = aboutScroll
+    })
+    vlist(headerSection, 4)
+    new("TextLabel", {
+        BackgroundTransparency = 1,
+        Size = UDim2.new(1, 0, 0, getFontSize(18)),
+        Font = FONTB,
+        Text = "Equilibrium — About",
+        TextSize = getFontSize(15),
+        TextColor3 = T.text,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        ZIndex = 14,
+        Parent = headerSection
+    })
+    new("TextLabel", {
+        BackgroundTransparency = 1,
+        Size = UDim2.new(1, 0, 0, getFontSize(16)),
+        Font = FONT,
+        Text = "UI assets, credits, and build information",
+        TextSize = getFontSize(11),
+        TextColor3 = T.dim,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        ZIndex = 14,
+        Parent = headerSection
+    })
     
-    -- Identity Section
-    local identityCard = new("Frame",{BackgroundColor3=T.bg, Size=UDim2.new(1,0,0,0), AutomaticSize=Enum.AutomaticSize.Y, BorderSizePixel=0, ZIndex=13, Parent=aboutCard})
-    corner(identityCard, 12) stroke(identityCard, T.border) pad(identityCard, 16, 16, 16, 16) vlist(identityCard, 12)
-    new("TextLabel",{BackgroundTransparency=1, Size=UDim2.new(1,0,0,getFontSize(14)), Font=FONTB, Text="IDENTITY", TextSize=getFontSize(12), TextColor3=T.text, TextXAlignment=Enum.TextXAlignment.Center, ZIndex=14, Parent=identityCard})
+    -- Build Info Card (Two-column layout)
+    local buildCard = new("Frame", {
+        Name = "BuildInfoCard",
+        BackgroundColor3 = T.panel,
+        Size = UDim2.new(1, 0, 0, 0),
+        AutomaticSize = Enum.AutomaticSize.Y,
+        BorderSizePixel = 0,
+        ZIndex = 13,
+        Parent = aboutScroll
+    })
+    corner(buildCard, 10)
+    stroke(buildCard, T.border)
+    pad(buildCard, 12, 12, 14, 14)
+    vlist(buildCard, 8)
     
-    -- Profile ID Row
-    local idRow = new("Frame",{BackgroundTransparency=1, Size=UDim2.new(1,0,0,0), AutomaticSize=Enum.AutomaticSize.Y, ZIndex=14, Parent=identityCard})
-    vlist(idRow, 6)
-    new("TextLabel",{BackgroundTransparency=1, Size=UDim2.new(1,0,0,getFontSize(16)), Font=FONT, Text="Profile ID", TextSize=getFontSize(11), TextColor3=T.dim, TextXAlignment=Enum.TextXAlignment.Left, ZIndex=15, Parent=idRow})
-    local idInputRow = new("Frame",{BackgroundTransparency=1, Size=UDim2.new(1,0,0,32), ZIndex=15, Parent=idRow})
-    hlist(idInputRow, 8)
-    local profileIdBox = new("TextBox",{BackgroundColor3=T.bg, Size=UDim2.new(1,-100,1,0), Font=FONT, Text="070707", PlaceholderText="Enter ID", PlaceholderColor3=T.dim, TextSize=getFontSize(12), TextColor3=T.text, ClearTextOnFocus=false, ZIndex=16, Parent=idInputRow})
-    corner(profileIdBox, 8) stroke(profileIdBox, T.border) pad(profileIdBox, 0, 0, 10, 10)
-    local insertIdBtn = new("TextButton",{BackgroundColor3=T.panel, Size=UDim2.new(0,92,1,0), Text="Insert ID", Font=FONT, TextSize=getFontSize(11), TextColor3=T.text, AutoButtonColor=false, ZIndex=16, Parent=idInputRow})
-    corner(insertIdBtn, 8) stroke(insertIdBtn, T.border)
-    insertIdBtn.Activated:Connect(function() pushToast("ID inserted: "..profileIdBox.Text, "warn", 1.5) end)
+    new("TextLabel", {
+        BackgroundTransparency = 1,
+        Size = UDim2.new(1, 0, 0, getFontSize(14)),
+        Font = FONTB,
+        Text = "BUILD INFO",
+        TextSize = getFontSize(12),
+        TextColor3 = T.text,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        ZIndex = 14,
+        Parent = buildCard
+    })
     
-    -- Preset Row
-    local presetRow = new("Frame",{BackgroundTransparency=1, Size=UDim2.new(1,0,0,0), AutomaticSize=Enum.AutomaticSize.Y, ZIndex=15, Parent=identityCard})
-    vlist(presetRow, 6)
-    new("TextLabel",{BackgroundTransparency=1, Size=UDim2.new(1,0,0,getFontSize(16)), Font=FONT, Text="Preset", TextSize=getFontSize(11), TextColor3=T.dim, TextXAlignment=Enum.TextXAlignment.Left, ZIndex=16, Parent=presetRow})
-    local presetBtnRow = new("Frame",{BackgroundTransparency=1, Size=UDim2.new(1,0,0,32), ZIndex=16, Parent=presetRow})
+    -- Two-column build info row
+    local buildRow = new("Frame", {
+        BackgroundTransparency = 1,
+        Size = UDim2.new(1, 0, 0, 0),
+        AutomaticSize = Enum.AutomaticSize.Y,
+        ZIndex = 14,
+        Parent = buildCard
+    })
+    hlist(buildRow, 16)
+    
+    -- Version column
+    local versionCol = new("Frame", {
+        BackgroundTransparency = 1,
+        Size = UDim2.new(0.5, -8, 1, 0),
+        AutomaticSize = Enum.AutomaticSize.Y,
+        ZIndex = 14,
+        Parent = buildRow
+    })
+    vlist(versionCol, 4)
+    new("TextLabel", {
+        BackgroundTransparency = 1,
+        Size = UDim2.new(1, 0, 0, getFontSize(16)),
+        Font = FONT,
+        Text = "Version",
+        TextSize = getFontSize(10),
+        TextColor3 = T.dim,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        ZIndex = 15,
+        Parent = versionCol
+    })
+    new("TextLabel", {
+        BackgroundTransparency = 1,
+        Size = UDim2.new(1, 0, 0, getFontSize(20)),
+        Font = FONTB,
+        Text = "v2.2 — Build 10K-RP",
+        TextSize = getFontSize(12),
+        TextColor3 = T.text,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        ZIndex = 15,
+        Parent = versionCol
+    })
+    
+    -- Runtime column
+    local runtimeCol = new("Frame", {
+        BackgroundTransparency = 1,
+        Size = UDim2.new(0.5, -8, 1, 0),
+        AutomaticSize = Enum.AutomaticSize.Y,
+        ZIndex = 14,
+        Parent = buildRow
+    })
+    vlist(runtimeCol, 4)
+    new("TextLabel", {
+        BackgroundTransparency = 1,
+        Size = UDim2.new(1, 0, 0, getFontSize(16)),
+        Font = FONT,
+        Text = "Runtime",
+        TextSize = getFontSize(10),
+        TextColor3 = T.dim,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        ZIndex = 15,
+        Parent = runtimeCol
+    })
+    new("TextLabel", {
+        BackgroundTransparency = 1,
+        Size = UDim2.new(1, 0, 0, getFontSize(20)),
+        Font = FONTB,
+        Text = "Heartbeat-3",
+        TextSize = getFontSize(12),
+        TextColor3 = T.text,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        ZIndex = 15,
+        Parent = runtimeCol
+    })
+    
+    -- Asset Tools Card
+    local toolsCard = new("Frame", {
+        Name = "ToolsCard",
+        BackgroundColor3 = T.panel,
+        Size = UDim2.new(1, 0, 0, 0),
+        AutomaticSize = Enum.AutomaticSize.Y,
+        BorderSizePixel = 0,
+        ZIndex = 13,
+        Parent = aboutScroll
+    })
+    corner(toolsCard, 10)
+    stroke(toolsCard, T.border)
+    pad(toolsCard, 12, 12, 14, 14)
+    vlist(toolsCard, 10)
+    
+    new("TextLabel", {
+        BackgroundTransparency = 1,
+        Size = UDim2.new(1, 0, 0, getFontSize(14)),
+        Font = FONTB,
+        Text = "ASSET TOOLS",
+        TextSize = getFontSize(12),
+        TextColor3 = T.text,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        ZIndex = 14,
+        Parent = toolsCard
+    })
+    
+    -- Asset ID input row
+    local assetInputRow = new("Frame", {
+        BackgroundTransparency = 1,
+        Size = UDim2.new(1, 0, 0, 36),
+        ZIndex = 14,
+        Parent = toolsCard
+    })
+    hlist(assetInputRow, 8)
+    
+    local assetIdBox = new("TextBox", {
+        BackgroundColor3 = T.bg,
+        Size = UDim2.new(1, -100, 1, 0),
+        Font = FONT,
+        Text = "",
+        PlaceholderText = "Asset ID",
+        PlaceholderColor3 = T.dim,
+        TextSize = getFontSize(12),
+        TextColor3 = T.text,
+        ClearTextOnFocus = false,
+        ZIndex = 15,
+        Parent = assetInputRow
+    })
+    corner(assetIdBox, 8)
+    stroke(assetIdBox, T.border)
+    pad(assetIdBox, 0, 0, 12, 12)
+    
+    local insertBtn = new("TextButton", {
+        BackgroundColor3 = T.accent,
+        Size = UDim2.new(0, 92, 1, 0),
+        Text = "Insert ID",
+        Font = FONT,
+        TextSize = getFontSize(11),
+        TextColor3 = T.text,
+        AutoButtonColor = false,
+        ZIndex = 15,
+        Parent = assetInputRow
+    })
+    corner(insertBtn, 8)
+    insertBtn.Activated:Connect(function()
+        if assetIdBox.Text ~= "" then
+            pushToast("Asset ID inserted: " .. assetIdBox.Text, "warn", 1.5)
+        end
+    end)
+    
+    -- Preset buttons row
+    local presetSection = new("Frame", {
+        BackgroundTransparency = 1,
+        Size = UDim2.new(1, 0, 0, 0),
+        AutomaticSize = Enum.AutomaticSize.Y,
+        ZIndex = 14,
+        Parent = toolsCard
+    })
+    vlist(presetSection, 6)
+    
+    new("TextLabel", {
+        BackgroundTransparency = 1,
+        Size = UDim2.new(1, 0, 0, getFontSize(16)),
+        Font = FONT,
+        Text = "Presets:",
+        TextSize = getFontSize(11),
+        TextColor3 = T.dim,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        ZIndex = 15,
+        Parent = presetSection
+    })
+    
+    local presetBtnRow = new("Frame", {
+        BackgroundTransparency = 1,
+        Size = UDim2.new(1, 0, 0, 32),
+        ZIndex = 15,
+        Parent = presetSection
+    })
     hlist(presetBtnRow, 8)
-    local customBtn = new("TextButton",{BackgroundColor3=T.accent, Size=UDim2.new(0,70,1,0), Text="Custom", Font=FONT, TextSize=getFontSize(10), TextColor3=T.text, AutoButtonColor=false, ZIndex=17, Parent=presetBtnRow})
-    corner(customBtn, 6)
-    local p5Btn = new("TextButton",{BackgroundColor3=T.panel, Size=UDim2.new(0,50,1,0), Text="P5", Font=FONT, TextSize=getFontSize(10), TextColor3=T.text, AutoButtonColor=false, ZIndex=17, Parent=presetBtnRow})
-    corner(p5Btn, 6) stroke(p5Btn, T.border)
-    local p6Btn = new("TextButton",{BackgroundColor3=T.panel, Size=UDim2.new(0,50,1,0), Text="P6", Font=FONT, TextSize=getFontSize(10), TextColor3=T.text, AutoButtonColor=false, ZIndex=17, Parent=presetBtnRow})
-    corner(p6Btn, 6) stroke(p6Btn, T.border)
     
-    -- Special Thanks Section
-    local thanksSection = new("Frame",{BackgroundTransparency=1, Size=UDim2.new(1,0,0,0), AutomaticSize=Enum.AutomaticSize.Y, ZIndex=13, Parent=aboutCard})
-    vlist(thanksSection, 8)
-    new("TextLabel",{BackgroundTransparency=1, Size=UDim2.new(1,0,0,getFontSize(14)), Font=FONTB, Text="SPECIAL THANKS", TextSize=getFontSize(12), TextColor3=T.text, TextXAlignment=Enum.TextXAlignment.Center, ZIndex=14, Parent=thanksSection})
-    local thanksTags = new("Frame",{BackgroundTransparency=1, Size=UDim2.new(1,0,0,0), AutomaticSize=Enum.AutomaticSize.Y, ZIndex=14, Parent=thanksSection})
-    local thanksLayout = new("UIListLayout",{FillDirection=Enum.FillDirection.Horizontal, HorizontalAlignment=Enum.HorizontalAlignment.Center, VerticalAlignment=Enum.VerticalAlignment.Center, SortOrder=Enum.SortOrder.LayoutOrder, Padding=UDim.new(0,6), Parent=thanksTags})
-    local thanksWrapping = new("UIPadding",{PaddingTop=UDim.new(0,4), PaddingBottom=UDim.new(0,4), Parent=thanksTags})
-    local thanksItems = {"Verity team", "Fleece Utility", "SchizHub v7", "Base_Rework", "DarkHub", "TokkuHub", "Contributors"}
-    for i,item in ipairs(thanksItems) do
-        local tag = new("TextLabel",{BackgroundColor3=T.bg, Size=UDim2.new(0,0,0,26), AutomaticSize=Enum.AutomaticSize.X, Font=FONT, Text=item, TextSize=getFontSize(10), TextColor3=T.dim, ZIndex=15, Parent=thanksTags})
-        corner(tag, 6) stroke(tag, T.border) pad(tag, 4, 4, 8, 8)
+    for i = 1, 6 do
+        local pBtn = new("TextButton", {
+            BackgroundColor3 = T.panel,
+            Size = UDim2.new(1/6, -10, 1, 0),
+            Text = "P" .. i,
+            Font = FONT,
+            TextSize = getFontSize(10),
+            TextColor3 = T.text,
+            AutoButtonColor = false,
+            ZIndex = 16,
+            Parent = presetBtnRow
+        })
+        corner(pBtn, 6)
+        stroke(pBtn, T.border)
+        pBtn.Activated:Connect(function()
+            pushToast("Preset P" .. i .. " activated", "info", 1)
+        end)
     end
     
+    -- Credits Card
+    local creditsCard = new("Frame", {
+        Name = "CreditsCard",
+        BackgroundColor3 = T.panel,
+        Size = UDim2.new(1, 0, 0, 0),
+        AutomaticSize = Enum.AutomaticSize.Y,
+        BorderSizePixel = 0,
+        ZIndex = 13,
+        Parent = aboutScroll
+    })
+    corner(creditsCard, 10)
+    stroke(creditsCard, T.border)
+    pad(creditsCard, 12, 12, 14, 14)
+    vlist(creditsCard, 10)
+    
+    new("TextLabel", {
+        BackgroundTransparency = 1,
+        Size = UDim2.new(1, 0, 0, getFontSize(14)),
+        Font = FONTB,
+        Text = "CREDITS",
+        TextSize = getFontSize(12),
+        TextColor3 = T.text,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        ZIndex = 14,
+        Parent = creditsCard
+    })
+    
+    -- Team section
+    local teamSection = new("Frame", {
+        BackgroundTransparency = 1,
+        Size = UDim2.new(1, 0, 0, 0),
+        AutomaticSize = Enum.AutomaticSize.Y,
+        ZIndex = 14,
+        Parent = creditsCard
+    })
+    vlist(teamSection, 6)
+    
+    new("TextLabel", {
+        BackgroundTransparency = 1,
+        Size = UDim2.new(1, 0, 0, getFontSize(16)),
+        Font = FONT,
+        Text = "Verity Team",
+        TextSize = getFontSize(11),
+        TextColor3 = T.text,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        ZIndex = 15,
+        Parent = teamSection
+    })
+    
+    local teamTags = new("Frame", {
+        BackgroundTransparency = 1,
+        Size = UDim2.new(1, 0, 0, 0),
+        AutomaticSize = Enum.AutomaticSize.Y,
+        ZIndex = 15,
+        Parent = teamSection
+    })
+    local teamLayout = new("UIListLayout", {
+        FillDirection = Enum.FillDirection.Horizontal,
+        HorizontalAlignment = Enum.HorizontalAlignment.Left,
+        VerticalAlignment = Enum.VerticalAlignment.Center,
+        SortOrder = Enum.SortOrder.LayoutOrder,
+        Padding = UDim.new(0, 6),
+        Parent = teamTags
+    })
+    new("UIPadding", {
+        PaddingTop = UDim.new(0, 4),
+        PaddingBottom = UDim.new(0, 4),
+        Parent = teamTags
+    })
+    
+    local teamItems = {"Fleece Utility", "SchizHub V7", "SchizHub", "KHub", "TokkuHub"}
+    for _, item in ipairs(teamItems) do
+        local tag = new("TextLabel", {
+            BackgroundColor3 = T.bg,
+            Size = UDim2.new(0, 0, 0, 26),
+            AutomaticSize = Enum.AutomaticSize.X,
+            Font = FONT,
+            Text = item,
+            TextSize = getFontSize(10),
+            TextColor3 = T.dim,
+            ZIndex = 16,
+            Parent = teamTags
+        })
+        corner(tag, 6)
+        stroke(tag, T.border)
+        pad(tag, 4, 4, 8, 8)
+    end
+    
+    -- Contributors section
+    local contribSection = new("Frame", {
+        BackgroundTransparency = 1,
+        Size = UDim2.new(1, 0, 0, 0),
+        AutomaticSize = Enum.AutomaticSize.Y,
+        ZIndex = 14,
+        Parent = creditsCard
+    })
+    vlist(contribSection, 6)
+    
+    new("TextLabel", {
+        BackgroundTransparency = 1,
+        Size = UDim2.new(1, 0, 0, getFontSize(16)),
+        Font = FONT,
+        Text = "Contributors",
+        TextSize = getFontSize(11),
+        TextColor3 = T.text,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        ZIndex = 15,
+        Parent = contribSection
+    })
+    
+    local contribLabel = new("TextLabel", {
+        BackgroundTransparency = 1,
+        Size = UDim2.new(1, 0, 0, 0),
+        AutomaticSize = Enum.AutomaticSize.Y,
+        Font = FONT,
+        Text = "Community contributors and testers who helped improve Equilibrium.",
+        TextSize = getFontSize(11),
+        TextColor3 = T.dim,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        TextWrapped = true,
+        TextYAlignment = Enum.TextYAlignment.Top,
+        ZIndex = 15,
+        Parent = contribSection
+    })
+    
     -- Favorite Games Section
-    local gamesSection = new("Frame",{BackgroundTransparency=1, Size=UDim2.new(1,0,0,0), AutomaticSize=Enum.AutomaticSize.Y, ZIndex=13, Parent=aboutCard})
+    local gamesSection = new("Frame", {
+        Name = "FavoriteGamesSection",
+        BackgroundTransparency = 1,
+        Size = UDim2.new(1, 0, 0, 0),
+        AutomaticSize = Enum.AutomaticSize.Y,
+        ZIndex = 13,
+        Parent = aboutScroll
+    })
     vlist(gamesSection, 8)
-    new("TextLabel",{BackgroundTransparency=1, Size=UDim2.new(1,0,0,getFontSize(14)), Font=FONTB, Text="FAVORITE GAMES", TextSize=getFontSize(12), TextColor3=T.text, TextXAlignment=Enum.TextXAlignment.Center, ZIndex=14, Parent=gamesSection})
-    local gameList = new("Frame",{BackgroundTransparency=1, Size=UDim2.new(1,0,0,0), AutomaticSize=Enum.AutomaticSize.Y, ZIndex=14, Parent=gamesSection})
+    
+    new("TextLabel", {
+        BackgroundTransparency = 1,
+        Size = UDim2.new(1, 0, 0, getFontSize(14)),
+        Font = FONTB,
+        Text = "FAVORITE GAMES",
+        TextSize = getFontSize(12),
+        TextColor3 = T.text,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        ZIndex = 14,
+        Parent = gamesSection
+    })
+    
+    local gameList = new("Frame", {
+        BackgroundTransparency = 1,
+        Size = UDim2.new(1, 0, 0, 0),
+        AutomaticSize = Enum.AutomaticSize.Y,
+        ZIndex = 14,
+        Parent = gamesSection
+    })
     vlist(gameList, 6)
+    
     local games = {
         {"Ninja Legends", "Scriptbloxian Studios"},
         {"Phantom Forces", "StyLiS Studios"},
@@ -452,13 +823,133 @@ do
         {"Jailbreak", "Badimo"},
         {"BedWars", "Easy.gg"},
         {"Adopt Me!", "DreamCraft"},
+        {"Universal", "Teleport / teleport-tested reference"},
     }
-    for _,game in ipairs(games) do
-        local gameCard = new("Frame",{BackgroundColor3=T.bg, Size=UDim2.new(1,0,0,44), BorderSizePixel=0, ZIndex=15, Parent=gameList})
-        corner(gameCard, 10) stroke(gameCard, T.border) pad(gameCard, 0, 0, 14, 14)
-        new("TextLabel",{BackgroundTransparency=1, Size=UDim2.new(0.6,0,1,0), Font=FONTB, Text=game[1], TextSize=getFontSize(11), TextColor3=T.text, TextXAlignment=Enum.TextXAlignment.Left, TextTruncate=Enum.TextTruncate.AtEnd, ZIndex=16, Parent=gameCard})
-        new("TextLabel",{BackgroundTransparency=1, Size=UDim2.new(0.4,0,1,0), Position=UDim2.new(0.6,0,0,0), Font=FONT, Text=game[2], TextSize=getFontSize(10), TextColor3=T.dim, TextXAlignment=Enum.TextXAlignment.Right, TextTruncate=Enum.TextTruncate.AtEnd, ZIndex=16, Parent=gameCard})
+    
+    for _, game in ipairs(games) do
+        local gameCard = new("Frame", {
+            BackgroundColor3 = T.panel,
+            Size = UDim2.new(1, 0, 0, 44),
+            BorderSizePixel = 0,
+            ZIndex = 15,
+            Parent = gameList
+        })
+        corner(gameCard, 10)
+        stroke(gameCard, T.border)
+        pad(gameCard, 0, 0, 14, 14)
+        
+        new("TextLabel", {
+            BackgroundTransparency = 1,
+            Size = UDim2.new(0.55, 0, 1, 0),
+            Font = FONTB,
+            Text = game[1],
+            TextSize = getFontSize(14),
+            TextColor3 = T.text,
+            TextXAlignment = Enum.TextXAlignment.Left,
+            TextTruncate = Enum.TextTruncate.AtEnd,
+            ZIndex = 16,
+            Parent = gameCard
+        })
+        
+        new("TextLabel", {
+            BackgroundTransparency = 1,
+            AnchorPoint = Vector2.new(1, 0.5),
+            Position = UDim2.new(1, 0, 0.5, 0),
+            Size = UDim2.new(0.4, 0, 0, 20),
+            Font = FONT,
+            Text = game[2],
+            TextSize = getFontSize(11),
+            TextColor3 = Color3.fromRGB(120, 135, 155),
+            TextXAlignment = Enum.TextXAlignment.Right,
+            TextTruncate = Enum.TextTruncate.AtEnd,
+            ZIndex = 16,
+            Parent = gameCard
+        })
     end
+    
+    -- Inspiration Card (compact, at bottom)
+    local inspirationCard = new("Frame", {
+        Name = "InspirationCard",
+        BackgroundColor3 = T.panel,
+        Size = UDim2.new(1, 0, 0, 0),
+        AutomaticSize = Enum.AutomaticSize.Y,
+        BorderSizePixel = 0,
+        ZIndex = 13,
+        Parent = aboutScroll
+    })
+    corner(inspirationCard, 10)
+    stroke(inspirationCard, T.border)
+    pad(inspirationCard, 12, 12, 14, 14)
+    vlist(inspirationCard, 8)
+    
+    new("TextLabel", {
+        BackgroundTransparency = 1,
+        Size = UDim2.new(1, 0, 0, getFontSize(14)),
+        Font = FONTB,
+        Text = "INSPIRATION",
+        TextSize = getFontSize(12),
+        TextColor3 = T.text,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        ZIndex = 14,
+        Parent = inspirationCard
+    })
+    
+    new("TextLabel", {
+        BackgroundTransparency = 1,
+        Size = UDim2.new(1, 0, 0, 0),
+        AutomaticSize = Enum.AutomaticSize.Y,
+        Font = FONT,
+        Text = "Built with insights from Fleece Utility, SchizHub, and community feedback. Equilibrium aims to provide a clean, reliable interface for universal teleportation and game utilities.",
+        TextSize = getFontSize(11),
+        TextColor3 = T.dim,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        TextWrapped = true,
+        TextYAlignment = Enum.TextYAlignment.Top,
+        ZIndex = 14,
+        Parent = inspirationCard
+    })
+    
+    -- Diagnostics Card (compact, at bottom)
+    local diagnosticsCard = new("Frame", {
+        Name = "DiagnosticsCard",
+        BackgroundColor3 = T.panel,
+        Size = UDim2.new(1, 0, 0, 0),
+        AutomaticSize = Enum.AutomaticSize.Y,
+        BorderSizePixel = 0,
+        ZIndex = 13,
+        Parent = aboutScroll
+    })
+    corner(diagnosticsCard, 10)
+    stroke(diagnosticsCard, T.border)
+    pad(diagnosticsCard, 12, 12, 14, 14)
+    vlist(diagnosticsCard, 8)
+    
+    new("TextLabel", {
+        BackgroundTransparency = 1,
+        Size = UDim2.new(1, 0, 0, getFontSize(14)),
+        Font = FONTB,
+        Text = "DIAGNOSTICS",
+        TextSize = getFontSize(12),
+        TextColor3 = T.text,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        ZIndex = 14,
+        Parent = diagnosticsCard
+    })
+    
+    local diagContent = new("TextLabel", {
+        BackgroundTransparency = 1,
+        Size = UDim2.new(1, 0, 0, 0),
+        AutomaticSize = Enum.AutomaticSize.Y,
+        Font = FONT,
+        Text = "Status: OK\nRenderer: Standard\nInput: Active",
+        TextSize = getFontSize(11),
+        TextColor3 = T.dim,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        TextWrapped = true,
+        TextYAlignment = Enum.TextYAlignment.Top,
+        ZIndex = 14,
+        Parent = diagnosticsCard
+    })
 end
 
 -- ===== SETTINGS TAB (Size presets, Font changer) =====
