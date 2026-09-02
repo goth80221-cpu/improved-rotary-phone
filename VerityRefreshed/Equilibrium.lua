@@ -2480,6 +2480,14 @@ do
         return titleLabel, subLabel
     end
     
+    -- Info card helper: creates a card with title and content
+    local function makeInfoCard(parent, title, content, textSize)
+        local card=new("Frame",{BackgroundColor3=T.panel, BackgroundTransparency=0.3, Size=UDim2.new(1,0,0,0), AutomaticSize=Enum.AutomaticSize.Y, ZIndex=13, Parent=parent}) corner(card,8) stroke(card,T.border,1) pad(card,10,10,10,10)
+        local titleLabel=new("TextLabel",{BackgroundTransparency=1, Size=UDim2.new(1,0,0,13), Font=FONTB, Text=title, TextSize=11, TextColor3=T.text, TextXAlignment=Enum.TextXAlignment.Center, ZIndex=14, Parent=card})
+        local contentLabel=new("TextLabel",{BackgroundTransparency=1, Size=UDim2.new(1,0,0,0), AutomaticSize=Enum.AutomaticSize.Y, Font=FONT, Text=content, TextSize=textSize or 10, TextColor3=T.dim, TextXAlignment=Enum.TextXAlignment.Center, TextWrapped=true, ZIndex=14, Parent=card})
+        return card
+    end
+    
     -- Identity section (card layout)
     local identityCard=new("Frame",{BackgroundColor3=T.panel, BackgroundTransparency=0.5, Size=UDim2.new(1,0,0,0), AutomaticSize=Enum.AutomaticSize.Y, ZIndex=13, Parent=abCard}) corner(identityCard,10) stroke(identityCard,T.border,1) pad(identityCard,12,12,12,12)
     local idLayout=new("UIListLayout",{SortOrder=Enum.SortOrder.LayoutOrder, Padding=UDim2.fromOffset(0,10), Parent=identityCard})
