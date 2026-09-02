@@ -1,0 +1,203 @@
+getgenv().REDACT_INFO = true
+getgenv().SELF_COLOR = Color3.fromRGB(124, 181, 255)
+getgenv().FRIEND_COLOR = Color3.fromRGB(255, 233, 108)
+getgenv().SELF_FONT = Font.new("rbxassetid://12187366846", Enum.FontWeight.Medium, Enum.FontStyle.Normal)
+
+local BgColor = Color3.fromRGB(49, 51, 56)
+local LocalPlr = game:GetService("Players").LocalPlayer
+
+local GUI = game:GetService("CoreGui"):FindFirstChild("PlayerListReskin")
+
+if not GUI then
+    warn("You don't have the new playerlist idiot")
+    return
+end
+
+local Panel = GUI.Container.PlayerListPanel
+local PlayersContainer = Panel.LeaderboardBody.PlayerRows.ScrollingFrame
+
+-- Hides half the panel
+--[[
+local UIGradient = Instance.new("UIGradient")
+UIGradient.Rotation = -90
+UIGradient.Transparency = NumberSequence.new{
+	NumberSequenceKeypoint.new(0, 1),
+	NumberSequenceKeypoint.new(0.88, 1),
+	NumberSequenceKeypoint.new(0.88, 0),
+	NumberSequenceKeypoint.new(1, 0)
+}
+UIGradient.Parent = Panel
+]]
+
+Panel.Size = UDim2.new(0, 196, 0, 69)
+local playersSize = 0
+
+local function updatePanel()
+    Panel.Size = UDim2.new(0, Panel.Size.X.Offset, 0, 69 + playersSize)
+end
+
+local UIShadow = Instance.new("UIShadow")
+UIShadow.Transparency = 0.5
+UIShadow.BlurRadius = UDim.new(0, 10)
+UIShadow.Parent = Panel
+
+for _, team in pairs(PlayersContainer:GetChildren()) do
+    if team:IsA("Frame") then
+        for i, plr in pairs(team:GetChildren()) do
+            playersSize += plr.Size.Y.Offset
+
+            if plr.Name == "TeamHeader" then continue end
+
+            local userId = tonumber(plr.Name:match("^Player_(%d+)$"))
+            local isFriend = LocalPlr:IsFriendsWithAsync(userId)
+
+            local nameBadge = plr.RowContent.PeopleCell
+            if nameBadge:FindFirstChild("Badge") then
+                if isFriend then nameBadge.Badge.TextColor3 = FRIEND_COLOR end
+                nameBadge.Badge.LayoutOrder = 1
+            end
+            if isFriend then nameBadge.NameText.TextColor3 = FRIEND_COLOR end
+            nameBadge.NameText.LayoutOrder = 2
+
+            if userId == LocalPlr.UserId then
+                if nameBadge:FindFirstChild("Badge") then
+                    nameBadge.Badge.TextColor3 = SELF_COLOR
+                end
+                nameBadge.NameText.TextColor3 = SELF_COLOR
+                nameBadge.NameText.FontFace = SELF_FONT
+
+                if REDACT_INFO then
+                    nameBadge.NameText.Text = "REDACTED"
+                end
+            end
+        end
+
+        team.ChildAdded:Connect(function(c)
+            playersSize += c.Size.Y.Offset
+
+            if c.Name == "TeamHeader" then return end
+
+            local userId = tonumber(c.Name:match("^Player_(%d+)$"))
+            local isFriend = LocalPlr:IsFriendsWithAsync(userId)
+
+            local nameBadge = c.RowContent.PeopleCell
+            if nameBadge:FindFirstChild("Badge") then
+                if isFriend then nameBadge.Badge.TextColor3 = FRIEND_COLOR end
+                nameBadge.Badge.LayoutOrder = 1
+            end
+            if isFriend then nameBadge.NameText.TextColor3 = FRIEND_COLOR end
+            nameBadge.NameText.LayoutOrder = 2
+
+            updatePanel()
+        end)
+
+        team.ChildRemoved:Connect(function(c)
+            playersSize -= c.Size.Y.Offset
+
+            updatePanel()
+        end)
+    end
+end
+
+updatePanel()
+local spectating = false
+
+GUI.ChildAdded:Connect(function(c)
+    if c.Name == "ContextMenu" then
+        local Header = c.Menu.Header.NameColumn
+        local UIShadow = Instance.new("UIShadow")
+        UIShadow.Transparency = 0.5
+        UIShadow.BlurRadius = UDim.new(0, 10)
+        UIShadow.Parent = c.Menu
+
+        local ID = game:GetService("Players")[string.gsub(Header.Username.Text, "@", "")].UserId
+
+        local userIdThing = Header.Username:Clone()
+        userIdThing.Name = "UserId"
+        userIdThing.Text = tostring(game:GetService("Players")[string.gsub(Header.Username.Text, "@", "")].UserId)
+        userIdThing.LayoutOrder = 3
+        userIdThing.Parent = Header
+
+        if ID == LocalPlr.UserId then
+            if REDACT_INFO then
+                Header.Username.Text = "@REDACTED"
+                Header.DisplayName.Text = "REDACTED"
+                userIdThing.Text = "REDACTED"
+            end
+        end
+
+        userIdThing.InputBegan:Connect(function(input)
+            if input.UserInputType == Enum.UserInputType.MouseButton1 then
+                setclipboard(userIdThing.Text)
+                userIdThing.Text = "Copied!"
+                task.wait(1)
+                userIdThing.Text = REDACT_INFO and "REDACTED" or tostring(ID)
+            end
+        end)
+
+        c.Menu.Action_examine.Label.Text = "Examine"
+
+        if not c.Menu:FindFirstChild("Action_friend") then return end
+
+        c.Menu.Action_friend.Label.Text = c.Menu.Action_friend.Label.Text == "Connection Request" and "Add Friend" or "Unfriend"
+        c.Menu.Action_report.Label.Text = "Report"
+
+        -- Custom Buttons
+        if c.Menu:FindFirstChild("Action_friend") then
+            local GotoButton = c.Menu.Action_friend:Clone()
+            GotoButton.Name = "Action_goto"
+            GotoButton.Label.Text = "Goto"
+            GotoButton.Icon.Text = "double-chevron-large-right"
+            GotoButton.LayoutOrder = 6
+            GotoButton.Parent = c.Menu
+
+            GotoButton.Activated:Connect(function()
+                LocalPlr.Character:PivotTo(game:GetService("Players")[string.gsub(Header.Username.Text, "@", "")].Character:GetPivot())
+            end)
+
+            local SpecButton = c.Menu.Action_friend:Clone()
+            SpecButton.Name = "Action_spectate"
+            SpecButton.Label.Text = "Spectate"
+            SpecButton.Icon.Text = "eye"
+            SpecButton.LayoutOrder = 7
+            SpecButton.Parent = c.Menu
+
+            SpecButton.Activated:Connect(function()
+                local cam = workspace.CurrentCamera
+                local icon = SpecButton.Icon
+
+                if spectating then
+                    spectating = false
+                    local myHum = LocalPlr.Character and LocalPlr.Character:FindFirstChildOfClass("Humanoid")
+                    if myHum then cam.CameraSubject = myHum end
+                    cam.CameraType = Enum.CameraType.Custom
+                    icon.Text = "eye"
+                    return
+                end
+
+                local plr = game:GetService("Players"):GetPlayerByUserId(ID)
+                local hum = plr and plr.Character and plr.Character:FindFirstChildOfClass("Humanoid")
+                if not hum then return end
+
+                spectating = true
+                cam.CameraSubject = hum
+                cam.CameraType = Enum.CameraType.Custom
+                icon.Text = "eye-slash"
+            end)
+        end
+
+        for i, v in pairs(c.Menu:GetChildren()) do
+            if v:IsA("ImageButton") then
+                v.MouseEnter:Connect(function()
+                    v.Label.TextColor3 = Color3.fromRGB(255, 255, 255)
+                    v.Icon.TextColor3 = Color3.fromRGB(255, 255, 255)
+                end)
+
+                v.MouseLeave:Connect(function()
+                    v.Label.TextColor3 = Color3.fromRGB(213, 215, 221)
+                    v.Icon.TextColor3 = Color3.fromRGB(213, 215, 221)
+                end)
+            end
+        end
+    end
+end)

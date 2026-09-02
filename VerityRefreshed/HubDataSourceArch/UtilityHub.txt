@@ -1,0 +1,5513 @@
+do
+	local ok, registry = pcall(function() return getgenv().__fleeceRegistry end)
+	if ok and type(registry) == "table" then
+		for _, fn in ipairs(registry) do
+			if type(fn) == "function" then pcall(fn) end
+		end
+		table.clear(registry)
+	end
+	for _, key in ipairs({ "FleeceUnload", "VertexUnload" }) do
+		local ok2, fn = pcall(function() return getgenv()[key] end)
+		if ok2 and type(fn) == "function" then pcall(fn) end
+	end
+end
+
+local BRAND      = "Fleece's Utility Panel"
+local SHORT      = BRAND
+local UNLOAD_KEY = "FleeceUnload"
+local CFG_FOLDER = "fleece"
+
+local Players          = game:GetService("Players")
+local RunService       = game:GetService("RunService")
+local UserInputService  = game:GetService("UserInputService")
+local TweenService     = game:GetService("TweenService")
+local Lighting         = game:GetService("Lighting")
+local HttpService      = game:GetService("HttpService")
+local TeleportService   = game:GetService("TeleportService")
+local VirtualUser       = game:GetService("VirtualUser")
+local GuiService        = game:GetService("GuiService")
+local Workspace         = game:GetService("Workspace")
+
+local LP = Players.LocalPlayer
+
+local rng = Random.new(os.clock() * 1e6 % 2147483647)
+local NAME_CHARS = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+local NAME_N = #NAME_CHARS
+
+local function rname()
+	local len = rng:NextInteger(22, 34)
+	local buf = table.create(len)
+	for i = 1, len do
+		local n = rng:NextInteger(1, NAME_N)
+		buf[i] = string.sub(NAME_CHARS, n, n)
+	end
+	return table.concat(buf)
+end
+
+local Env = {}
+do
+	local names = {
+		"hookmetamethod", "getrawmetatable", "setreadonly", "newcclosure",
+		"checkcaller", "getnamecallmethod", "getconnections", "firetouchinterest",
+		"fireproximityprompt", "setfpscap", "sethiddenproperty", "getgenv",
+		"writefile", "readfile", "isfile", "isfolder", "makefolder", "delfile",
+		"setclipboard", "gethui", "Drawing", "queue_on_teleport", "protectgui",
+		"mousemoverel",
+	}
+	for _, n in ipairs(names) do
+		local found = false
+		pcall(function() if rawget(getfenv(), n) ~= nil then found = true end end)
+		if not found then
+			pcall(function() if getgenv()[n] ~= nil then found = true end end)
+		end
+		Env[n] = found
+	end
+	local ok, isFn = pcall(function() return type(game.HttpGet) == "function" end)
+	Env.httpget = (ok and isFn) or false
+end
+
+local function capable(list)
+	for _, n in ipairs(list or {}) do
+		if not Env[n] then return false, n end
+	end
+	return true
+end
+
+local Maid = {}
+Maid.__index = Maid
+
+function Maid.new()
+	return setmetatable({ _items = {}, _dead = false }, Maid)
+end
+
+function Maid:give(v)
+	if self._dead then
+		pcall(function()
+			if typeof(v) == "RBXScriptConnection" then v:Disconnect()
+			elseif typeof(v) == "Instance" then v:Destroy()
+			elseif typeof(v) == "thread" then task.cancel(v)
+			elseif type(v) == "function" then v() end
+		end)
+		return v
+	end
+	table.insert(self._items, v)
+	return v
+end
+
+function Maid:clean()
+	local items = self._items
+	self._items = {}
+	for i = #items, 1, -1 do
+		local v = items[i]
+		local ok, err = pcall(function()
+			if typeof(v) == "RBXScriptConnection" then
+				v:Disconnect()
+			elseif typeof(v) == "Instance" then
+				v:Destroy()
+			elseif typeof(v) == "thread" then
+				if coroutine.status(v) ~= "dead" then task.cancel(v) end
+			elseif type(v) == "function" then
+				v()
+			elseif type(v) == "table" and v.clean then
+				v:clean()
+			end
+		end)
+		if not ok then
+			local _ = err
+		end
+	end
+end
+
+function Maid:destroy()
+	self:clean()
+	self._dead = true
+end
+
+local Claims = setmetatable({}, { __mode = "k" })
+
+local function claimSet(holder, obj, prop, value)
+	local props = Claims[obj]
+	if not props then
+		props = {}
+		Claims[obj] = props
+	end
+	local claim = props[prop]
+	if not claim then
+		local ok, old = pcall(function() return obj[prop] end)
+		if not ok then return end
+		claim = { original = { old }, holders = {}, count = 0 }
+		props[prop] = claim
+	end
+	if not claim.holders[holder] then
+		claim.holders[holder] = true
+		claim.count += 1
+	end
+	pcall(function() obj[prop] = value end)
+end
+
+local function Restorer()
+	local token = {}
+	local held = {}
+	local seen = {}
+	local r = {}
+
+	local function track(obj, prop)
+		local s = seen[obj]
+		if not s then
+			s = {}
+			seen[obj] = s
+		end
+		if not s[prop] then
+			s[prop] = true
+			table.insert(held, { obj = obj, prop = prop })
+		end
+	end
+
+	function r.set(obj, prop, value)
+		if typeof(obj) ~= "Instance" then return end
+		track(obj, prop)
+		claimSet(token, obj, prop, value)
+	end
+
+	function r.setFrom(obj, prop, value, original)
+		if typeof(obj) ~= "Instance" then return end
+		track(obj, prop)
+		local props = Claims[obj]
+		if not props then
+			props = {}
+			Claims[obj] = props
+		end
+		if not props[prop] then
+			props[prop] = { original = { original }, holders = {}, count = 0 }
+		end
+		claimSet(token, obj, prop, value)
+	end
+
+	function r.restoreAll()
+		for i = #held, 1, -1 do
+			local e = held[i]
+			held[i] = nil
+			local props = Claims[e.obj]
+			local claim = props and props[e.prop]
+			if claim and claim.holders[token] then
+				claim.holders[token] = nil
+				claim.count -= 1
+				if claim.count <= 0 then
+					pcall(function() e.obj[e.prop] = claim.original[1] end)
+					props[e.prop] = nil
+				end
+			end
+		end
+		seen = {}
+	end
+
+	return r
+end
+
+local Scheduler = {}
+do
+	local buckets = {
+		render    = { signal = RunService.RenderStepped, list = {}, conn = nil, steppedArgs = false },
+		stepped   = { signal = RunService.Stepped,       list = {}, conn = nil, steppedArgs = true },
+		heartbeat = { signal = RunService.Heartbeat,     list = {}, conn = nil, steppedArgs = false },
+	}
+
+	Scheduler.cost = {}
+	Scheduler.profiling = true
+
+	local function pump(bucket)
+		return function(a, b)
+			local dt = bucket.steppedArgs and b or a
+			local list = bucket.list
+			local profiling = Scheduler.profiling
+			for i = #list, 1, -1 do
+				local entry = list[i]
+				local ok, err
+				if profiling then
+					local t0 = os.clock()
+					ok, err = pcall(entry.fn, dt)
+					Scheduler.cost[entry.key] = (os.clock() - t0) * 1000
+				else
+					ok, err = pcall(entry.fn, dt)
+				end
+				if not ok then
+					table.remove(list, i)
+					Scheduler.cost[entry.key] = nil
+					if entry.onError then
+						task.spawn(entry.onError, err)
+					else
+						local _ = err
+					end
+				end
+			end
+		end
+	end
+
+	function Scheduler.add(name, key, fn, onError)
+		local bucket = buckets[name]
+		if not bucket then return end
+		Scheduler.remove(name, key)
+		table.insert(bucket.list, { key = key, fn = fn, onError = onError })
+		if not bucket.conn then
+			bucket.conn = bucket.signal:Connect(pump(bucket))
+		end
+	end
+
+	function Scheduler.remove(name, key)
+		local bucket = buckets[name]
+		if not bucket then return end
+		for i = #bucket.list, 1, -1 do
+			if bucket.list[i].key == key then table.remove(bucket.list, i) end
+		end
+		Scheduler.cost[key] = nil
+		if #bucket.list == 0 and bucket.conn then
+			bucket.conn:Disconnect()
+			bucket.conn = nil
+		end
+	end
+
+	function Scheduler.stopAll()
+		for _, bucket in pairs(buckets) do
+			if bucket.conn then bucket.conn:Disconnect() end
+			bucket.conn, bucket.list = nil, {}
+		end
+		Scheduler.cost = {}
+	end
+end
+
+local Char = { model = nil, hum = nil, root = nil, onRespawn = {} }
+local rootMaid = Maid.new()
+local charMaid = Maid.new()
+
+local partCache, partCacheValid = {}, false
+local function invalidateParts() partCacheValid = false end
+
+local collideBaseline = setmetatable({}, { __mode = "k" })
+
+local function baseCollide(part)
+	local v = collideBaseline[part]
+	if v == nil then
+		v = part.CanCollide
+		collideBaseline[part] = v
+	end
+	return v
+end
+
+local function charParts()
+	if not partCacheValid then
+		partCache = {}
+		if Char.model then
+			for _, d in ipairs(Char.model:GetDescendants()) do
+				if d:IsA("BasePart") then table.insert(partCache, d) end
+			end
+		end
+		partCacheValid = true
+	end
+	return partCache
+end
+
+local function bindCharacter(model)
+	charMaid:clean()
+	invalidateParts()
+	Char.model = model
+	Char.hum   = model:FindFirstChildOfClass("Humanoid")
+	Char.root  = model:FindFirstChild("HumanoidRootPart")
+
+	task.spawn(function()
+		if not Char.hum then Char.hum = model:WaitForChild("Humanoid", 10) end
+		if not Char.root then Char.root = model:WaitForChild("HumanoidRootPart", 10) end
+		invalidateParts()
+
+		for _, p in ipairs(charParts()) do baseCollide(p) end
+		for _, fn in ipairs(Char.onRespawn) do
+			task.spawn(fn)
+		end
+	end)
+
+	charMaid:give(model.DescendantAdded:Connect(invalidateParts))
+	charMaid:give(model.DescendantRemoving:Connect(invalidateParts))
+end
+
+if LP.Character then bindCharacter(LP.Character) end
+rootMaid:give(LP.CharacterAdded:Connect(bindCharacter))
+rootMaid:give(charMaid)
+
+local function alive()
+	return (Char.model ~= nil and Char.model.Parent ~= nil
+		and Char.hum ~= nil and Char.hum.Health > 0
+		and Char.root ~= nil and Char.root.Parent ~= nil)
+end
+
+local function awaitAlive(timeout)
+	local deadline = os.clock() + (timeout or 5)
+	while not alive() and os.clock() < deadline do
+		task.wait(0.1)
+	end
+	return alive()
+end
+
+local function flatLook(v)
+	local flat = Vector3.new(v.X, 0, v.Z)
+	if flat.Magnitude < 1e-4 then return Vector3.new(0, 0, -1) end
+	return flat.Unit
+end
+
+local function safeLookAt(position, direction)
+	return CFrame.lookAt(position, position + flatLook(direction))
+end
+
+local function isFinite(v)
+	return v == v and v ~= math.huge and v ~= -math.huge
+end
+
+local function safeVector(v)
+	if not (isFinite(v.X) and isFinite(v.Y) and isFinite(v.Z)) then
+		return Vector3.zero
+	end
+	return v
+end
+
+local function px(n)
+	return math.floor(n + 0.5)
+end
+
+local function offset(x, y)
+	return UDim2.fromOffset(px(x), px(y))
+end
+
+local T = {
+	bg         = Color3.fromHex("070707"),
+	shellLine  = Color3.fromHex("252525"),
+	titleLine  = Color3.fromHex("1c1c1c"),
+	panel      = Color3.fromHex("0d0d0d"),
+	panelLine  = Color3.fromHex("2a2a2a"),
+	field      = Color3.fromHex("0a0a0a"),
+	fieldLine  = Color3.fromHex("323232"),
+	button     = Color3.fromHex("161616"),
+	buttonLine = Color3.fromHex("333333"),
+	hover      = Color3.fromHex("1f1f1f"),
+	hoverLine  = Color3.fromHex("454545"),
+	press      = Color3.fromHex("101010"),
+	popup      = Color3.fromHex("131313"),
+	popupLine  = Color3.fromHex("3a3a3a"),
+	optHover   = Color3.fromHex("262626"),
+	rowHover   = Color3.fromHex("1a1a1a"),
+
+	text       = Color3.fromHex("f2f2f2"),
+	title      = Color3.fromHex("dcdcdc"),
+	label      = Color3.fromHex("cfcfcf"),
+	muted      = Color3.fromHex("b0b0b0"),
+	note       = Color3.fromHex("9a9a9a"),
+	tag        = Color3.fromHex("8c8c8c"),
+
+	logBg      = Color3.fromHex("090909"),
+	logText    = Color3.fromHex("d2d2d2"),
+	track      = Color3.fromHex("1a1a1a"),
+	scroll     = Color3.fromHex("3d3d3d"),
+	white      = Color3.fromHex("ffffff"),
+	black      = Color3.fromHex("000000"),
+	dim        = Color3.fromHex("e7e7e7"),
+	red        = Color3.fromHex("ff5f57"),
+	yellow     = Color3.fromHex("febc2e"),
+	green      = Color3.fromHex("28c840"),
+}
+
+local FONT, FONT_MED, FONT_BOLD, FONT_MONO
+do
+	local function pick(name, fallback)
+		local ok, f = pcall(function() return Enum.Font[name] end)
+		if ok and f then return f end
+		return fallback
+	end
+	FONT      = pick("BuilderSansMedium", Enum.Font.GothamMedium)
+	FONT_MED  = pick("BuilderSansMedium", Enum.Font.GothamMedium)
+	FONT_BOLD = pick("BuilderSansBold",   Enum.Font.GothamBold)
+	FONT_MONO = Enum.Font.Code
+end
+
+local MOTION = {
+	micro  = TweenInfo.new(0.11, Enum.EasingStyle.Quad,  Enum.EasingDirection.Out),
+	hover  = TweenInfo.new(0.16, Enum.EasingStyle.Quart, Enum.EasingDirection.Out),
+	enter  = TweenInfo.new(0.26, Enum.EasingStyle.Quint, Enum.EasingDirection.Out),
+	exit   = TweenInfo.new(0.14, Enum.EasingStyle.Quart, Enum.EasingDirection.In),
+	window = TweenInfo.new(0.42, Enum.EasingStyle.Quint, Enum.EasingDirection.Out),
+	morph  = TweenInfo.new(0.38, Enum.EasingStyle.Quint, Enum.EasingDirection.InOut),
+	knob   = TweenInfo.new(0.34, Enum.EasingStyle.Back,  Enum.EasingDirection.Out),
+	pill   = TweenInfo.new(0.30, Enum.EasingStyle.Quint, Enum.EasingDirection.Out),
+	card   = TweenInfo.new(0.30, Enum.EasingStyle.Quint, Enum.EasingDirection.Out),
+}
+
+local EASE_FAST = MOTION.hover
+
+local spawned = setmetatable({}, { __mode = "k" })
+
+local function new(class, props, kids)
+	local o = Instance.new(class)
+	spawned[o] = true
+	local parent = nil
+	for k, v in pairs(props or {}) do
+		if k == "Parent" then
+			parent = v
+		elseif k == "Name" then
+
+		elseif k == "Font" then
+			if typeof(v) == "Font" then o.FontFace = v else o.Font = v end
+		else
+			o[k] = v
+		end
+	end
+	o.Name = rname()
+	for _, c in ipairs(kids or {}) do c.Parent = o end
+	if parent then o.Parent = parent end
+	return o
+end
+
+local function corner(inst, r)
+	return new("UICorner", { CornerRadius = UDim.new(0, r or 10), Parent = inst })
+end
+
+local function stroke(inst, color, thick)
+	return new("UIStroke", {
+		Color = color or T.panelLine,
+		Thickness = thick or 1,
+		ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
+		LineJoinMode = Enum.LineJoinMode.Round,
+		Parent = inst,
+	})
+end
+
+local function pad(inst, t, b, l, r)
+	return new("UIPadding", {
+		PaddingTop = UDim.new(0, t or 0),
+		PaddingBottom = UDim.new(0, b or t or 0),
+		PaddingLeft = UDim.new(0, l or 0),
+		PaddingRight = UDim.new(0, r or l or 0),
+		Parent = inst,
+	})
+end
+
+local function vlist(inst, gap)
+	return new("UIListLayout", {
+		FillDirection = Enum.FillDirection.Vertical,
+		SortOrder = Enum.SortOrder.LayoutOrder,
+		Padding = UDim.new(0, gap or 8),
+		Parent = inst,
+	})
+end
+
+local function hlist(inst, gap, align)
+
+-- Created by and originally uploaded by https://robloxscripts.com/user/Fleece
+
+	return new("UIListLayout", {
+		FillDirection = Enum.FillDirection.Horizontal,
+		SortOrder = Enum.SortOrder.LayoutOrder,
+		Padding = UDim.new(0, gap or 8),
+		VerticalAlignment = align or Enum.VerticalAlignment.Center,
+		Parent = inst,
+	})
+end
+
+local function tw(inst, info, goal)
+	local t = TweenService:Create(inst, info, goal)
+	t:Play()
+	return t
+end
+
+local function hoverable(btn, base, hoverColor, strokeInst, baseLine, hoverLine)
+	btn.MouseEnter:Connect(function()
+		tw(btn, MOTION.hover, { BackgroundColor3 = hoverColor })
+		if strokeInst and hoverLine then tw(strokeInst, MOTION.hover, { Color = hoverLine }) end
+	end)
+	btn.MouseLeave:Connect(function()
+		tw(btn, MOTION.hover, { BackgroundColor3 = base })
+		if strokeInst and baseLine then tw(strokeInst, MOTION.hover, { Color = baseLine }) end
+	end)
+end
+
+local function buildFade(root)
+	local elems = {}
+
+	local function add(inst, prop)
+		local ok, base = pcall(function() return inst[prop] end)
+		if ok and type(base) == "number" and base < 1 then
+			table.insert(elems, { inst = inst, prop = prop, base = base })
+		end
+	end
+
+	add(root, "BackgroundTransparency")
+	for _, d in ipairs(root:GetDescendants()) do
+		if d:IsA("UIStroke") then
+			add(d, "Transparency")
+		elseif d:IsA("TextLabel") or d:IsA("TextButton") or d:IsA("TextBox") then
+			add(d, "TextTransparency")
+			add(d, "BackgroundTransparency")
+		elseif d:IsA("ImageLabel") or d:IsA("ImageButton") then
+			add(d, "ImageTransparency")
+			add(d, "BackgroundTransparency")
+		elseif d:IsA("GuiObject") then
+			add(d, "BackgroundTransparency")
+		end
+	end
+	return elems
+end
+
+local function setFade(elems, alpha)
+	for _, e in ipairs(elems) do
+		e.inst[e.prop] = e.base + (1 - e.base) * alpha
+	end
+end
+
+local function tweenFade(elems, alpha, info, delay)
+	local tweenInfo = info or MOTION.enter
+	if delay and delay > 0 then
+		tweenInfo = TweenInfo.new(
+			tweenInfo.Time, tweenInfo.EasingStyle, tweenInfo.EasingDirection,
+			0, false, delay
+		)
+	end
+	for _, e in ipairs(elems) do
+		TweenService:Create(e.inst, tweenInfo, {
+			[e.prop] = e.base + (1 - e.base) * alpha,
+		}):Play()
+	end
+end
+
+local screen = new("ScreenGui", {
+	ResetOnSpawn = false,
+	ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
+	IgnoreGuiInset = true,
+	DisplayOrder = 2147483647 - rng:NextInteger(1, 5000),
+	Enabled = false,
+})
+
+rootMaid:give(screen)
+
+local guiRoot
+
+local overlay = new("Frame", {
+	BackgroundTransparency = 1,
+	Size = UDim2.fromScale(1, 1),
+	Visible = false,
+	ZIndex = 500,
+	Parent = screen,
+})
+
+local overlayCatcher = new("TextButton", {
+	BackgroundTransparency = 1,
+	Text = "",
+	AutoButtonColor = false,
+	Size = UDim2.fromScale(1, 1),
+	ZIndex = 500,
+	Parent = overlay,
+})
+
+local closeActivePopup = nil
+overlayCatcher.Activated:Connect(function()
+	if closeActivePopup then closeActivePopup() end
+end)
+rootMaid:give(function()
+	if closeActivePopup then pcall(closeActivePopup) end
+end)
+
+local activeDrag = nil
+local dragPointer = nil
+
+rootMaid:give(UserInputService.InputChanged:Connect(function(input)
+	if not activeDrag then return end
+	if input.UserInputType == Enum.UserInputType.MouseMovement
+		or input.UserInputType == Enum.UserInputType.Touch then
+		dragPointer = input.Position
+	end
+end))
+
+Scheduler.add("render", "\0drag", function()
+	if activeDrag and dragPointer then
+		activeDrag.move(dragPointer)
+	end
+end)
+
+rootMaid:give(function() Scheduler.remove("render", "\0drag") end)
+
+rootMaid:give(UserInputService.InputEnded:Connect(function(input)
+	if not activeDrag then return end
+	if input.UserInputType == Enum.UserInputType.MouseButton1
+		or input.UserInputType == Enum.UserInputType.Touch then
+		local d = activeDrag
+		activeDrag = nil
+		dragPointer = nil
+		if d.finish then d.finish() end
+	end
+end))
+
+local notifyRoot = new("Frame", {
+	BackgroundTransparency = 1,
+	AnchorPoint = Vector2.new(1, 1),
+	Position = UDim2.new(1, -20, 1, -20),
+	Size = offset(330, 460),
+	ZIndex = 900,
+	Parent = screen,
+})
+new("UIListLayout", {
+	FillDirection = Enum.FillDirection.Vertical,
+	VerticalAlignment = Enum.VerticalAlignment.Bottom,
+	HorizontalAlignment = Enum.HorizontalAlignment.Right,
+	SortOrder = Enum.SortOrder.LayoutOrder,
+	Padding = UDim.new(0, 8),
+	Parent = notifyRoot,
+})
+
+local logLines = {}
+local logRefresh = nil
+
+local function pushLog(text)
+	table.insert(logLines, ("[%s]  %s"):format(os.date("%H:%M:%S"), text))
+	if #logLines > 400 then table.remove(logLines, 1) end
+	if logRefresh then logRefresh() end
+end
+
+local notifySeq = 0
+local liveNotifications = 0
+local MAX_NOTIFICATIONS = 5
+
+local function notify(text, kind, seconds)
+	pushLog(text)
+
+	if liveNotifications >= MAX_NOTIFICATIONS then
+		local oldest, oldestOrder = nil, math.huge
+		for _, c in ipairs(notifyRoot:GetChildren()) do
+			if c:IsA("Frame") and c.LayoutOrder < oldestOrder then
+				oldest, oldestOrder = c, c.LayoutOrder
+			end
+		end
+		if oldest then
+			liveNotifications -= 1
+			oldest:Destroy()
+		end
+	end
+
+	notifySeq += 1
+	liveNotifications += 1
+
+	local accent = (kind == "bad" and T.red) or (kind == "warn" and T.yellow) or T.green
+
+	local card = new("Frame", {
+		BackgroundColor3 = T.panel,
+		Size = UDim2.new(1, 0, 0, 0),
+		AutomaticSize = Enum.AutomaticSize.Y,
+		LayoutOrder = notifySeq,
+		ZIndex = 900,
+		Parent = notifyRoot,
+	})
+	corner(card, 12)
+	stroke(card, T.panelLine)
+	pad(card, 12, 12, 13, 13)
+	hlist(card, 11, Enum.VerticalAlignment.Top)
+
+	new("Frame", {
+		BackgroundColor3 = accent,
+		Size = offset(3, 18),
+		BorderSizePixel = 0,
+		LayoutOrder = 1,
+		ZIndex = 901,
+		Parent = card,
+	}, { new("UICorner", { CornerRadius = UDim.new(1, 0) }) })
+
+	new("TextLabel", {
+		BackgroundTransparency = 1,
+		Size = UDim2.new(1, -14, 0, 0),
+		AutomaticSize = Enum.AutomaticSize.Y,
+		Font = FONT,
+		Text = text,
+		TextSize = 15,
+		TextColor3 = T.text,
+		TextWrapped = true,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		LayoutOrder = 2,
+		ZIndex = 901,
+		Parent = card,
+	})
+
+	local fade = buildFade(card)
+	setFade(fade, 1)
+	card.Position = offset(26, 0)
+	tweenFade(fade, 0, MOTION.enter)
+	tw(card, MOTION.enter, { Position = offset(0, 0) })
+
+	task.delay(seconds or 3.5, function()
+		if not card.Parent then return end
+		liveNotifications -= 1
+		tweenFade(fade, 1, MOTION.exit)
+		local out = tw(card, MOTION.exit, { Position = offset(26, 0) })
+		out.Completed:Wait()
+		card:Destroy()
+	end)
+end
+
+local lastNotifyAt = {}
+local function notifyThrottled(id, gap, text, kind)
+	local now = os.clock()
+	if lastNotifyAt[id] and now - lastNotifyAt[id] < gap then return end
+	lastNotifyAt[id] = now
+	notify(text, kind)
+end
+
+local Config = {}
+
+local function cfgFile()
+	return ("%s/%d.json"):format(CFG_FOLDER, game.PlaceId)
+end
+
+function Config.save(tbl)
+	if not (Env.writefile and Env.isfolder and Env.makefolder) then
+		return false, "this executor has no file API"
+	end
+	local ok, err = pcall(function()
+		if not isfolder(CFG_FOLDER) then makefolder(CFG_FOLDER) end
+		writefile(cfgFile(), HttpService:JSONEncode(tbl))
+	end)
+	return ok, err
+end
+
+function Config.load()
+	if not (Env.readfile and Env.isfile) then return nil, "this executor has no file API" end
+	local ok, data = pcall(function()
+		if not isfile(cfgFile()) then return nil end
+		return HttpService:JSONDecode(readfile(cfgFile()))
+	end)
+	if not ok then return nil, tostring(data) end
+	return data
+end
+
+local function viewport()
+	local cam = Workspace.CurrentCamera
+	return cam and cam.ViewportSize or Vector2.new(1920, 1080)
+end
+
+local W, H, SIDEBAR_W
+do
+	local vp = viewport()
+	W = px(math.clamp(880, 320, math.max(320, vp.X - 40)))
+	H = px(math.clamp(620, 260, math.max(260, vp.Y - 40)))
+	SIDEBAR_W = px(math.clamp(W * 0.22, 124, 196))
+end
+
+local PUCK = 56
+local TOUCH = UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled
+
+local function centeredPos(w, h)
+	local vp = viewport()
+	return Vector2.new(px((vp.X - w) / 2), px((vp.Y - h) / 2))
+end
+
+local shell = new("Frame", {
+	BackgroundColor3 = T.bg,
+	Size = offset(W, H),
+	Position = offset(centeredPos(W, H).X, centeredPos(W, H).Y),
+	BorderSizePixel = 0,
+	ClipsDescendants = true,
+	ZIndex = 10,
+	Parent = screen,
+})
+local shellCorner = corner(shell, 14)
+local shellStroke = stroke(shell, T.shellLine)
+
+local titleBar = new("Frame", {
+	BackgroundColor3 = T.bg,
+	Size = UDim2.new(1, 0, 0, 40),
+	BorderSizePixel = 0,
+	ZIndex = 11,
+})
+corner(titleBar, 14)
+new("Frame", {
+	BackgroundColor3 = T.bg,
+	Size = UDim2.new(1, 0, 0, 14),
+	Position = UDim2.new(0, 0, 1, -14),
+	BorderSizePixel = 0,
+	ZIndex = 11,
+	Parent = titleBar,
+})
+new("Frame", {
+	BackgroundColor3 = T.titleLine,
+	Size = UDim2.new(1, 0, 0, 1),
+	Position = UDim2.new(0, 0, 1, -1),
+	BorderSizePixel = 0,
+	ZIndex = 12,
+	Parent = titleBar,
+})
+
+new("TextLabel", {
+	BackgroundTransparency = 1,
+	Size = UDim2.fromScale(1, 1),
+	Font = FONT_BOLD,
+	Text = BRAND,
+	TextSize = 15,
+	TextColor3 = T.title,
+	ZIndex = 12,
+	Parent = titleBar,
+})
+
+local lightRow = new("Frame", {
+	BackgroundTransparency = 1,
+	AnchorPoint = Vector2.new(1, 0.5),
+	Position = UDim2.new(1, -14, 0.5, 0),
+	Size = offset(64, 14),
+	ZIndex = 12,
+	Parent = titleBar,
+})
+hlist(lightRow, 8)
+
+titleBar.Parent = nil
+
+local canvas = new("CanvasGroup", {
+	BackgroundTransparency = 1,
+	Size = UDim2.fromScale(1, 1),
+	GroupTransparency = 0,
+	ZIndex = 11,
+	Parent = shell,
+})
+
+titleBar.Parent = canvas
+
+local contentHolder = new("Frame", {
+	BackgroundTransparency = 1,
+	Position = offset(0, 40),
+	Size = UDim2.new(1, 0, 1, -40),
+	ZIndex = 11,
+	Parent = canvas,
+})
+
+local puck = new("TextButton", {
+	BackgroundColor3 = T.bg,
+	Size = offset(PUCK, PUCK),
+	Position = offset(centeredPos(PUCK, PUCK).X, centeredPos(PUCK, PUCK).Y),
+	Text = "",
+	AutoButtonColor = false,
+	BorderSizePixel = 0,
+	Visible = false,
+	ZIndex = 40,
+	Parent = screen,
+})
+corner(puck, 16)
+local puckStroke = stroke(puck, T.shellLine)
+
+local puckLetter = new("TextLabel", {
+	BackgroundTransparency = 1,
+	Position = offset(0, -2),
+	Size = UDim2.fromScale(1, 1),
+	Font = FONT_BOLD,
+	Text = "U",
+	TextSize = 28,
+	TextColor3 = T.white,
+	TextXAlignment = Enum.TextXAlignment.Center,
+	TextYAlignment = Enum.TextYAlignment.Center,
+	ZIndex = 41,
+	Parent = puck,
+})
+
+local minimized = false
+local animatingMinimize = false
+local fullscreen = false
+local shellRect = { size = Vector2.new(W, H), pos = centeredPos(W, H) }
+local puckHome = nil
+
+local puckScale = new("UIScale", { Scale = 1, Parent = puck })
+
+local MIN_FADE, MIN_MOVE = 0.20, 0.20
+local RES_FADE, RES_MOVE = 0.26, 0.34
+
+local function shellFadeTo(alpha, duration, easing)
+	return tw(canvas, TweenInfo.new(duration, easing or Enum.EasingStyle.Quad,
+		Enum.EasingDirection.Out), { GroupTransparency = alpha })
+end
+
+local function chromeFadeTo(alpha, duration)
+	tw(shell, TweenInfo.new(duration, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+		{ BackgroundTransparency = alpha })
+	tw(shellStroke, TweenInfo.new(duration, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+		{ Transparency = alpha })
+end
+
+local function doMinimize()
+	if minimized or animatingMinimize then return end
+	animatingMinimize = true
+	minimized = true
+	if closeActivePopup then closeActivePopup() end
+
+	local pos = Vector2.new(shell.Position.X.Offset, shell.Position.Y.Offset)
+	local size = Vector2.new(shell.AbsoluteSize.X, shell.AbsoluteSize.Y)
+	if not fullscreen then shellRect.size, shellRect.pos = size, pos end
+
+	local vp = viewport()
+	local target = puckHome or Vector2.new(
+		px(pos.X + size.X / 2 - PUCK / 2),
+		px(pos.Y + size.Y / 2 - PUCK / 2)
+	)
+	target = Vector2.new(
+		math.clamp(target.X, 0, math.max(0, px(vp.X - PUCK))),
+		math.clamp(target.Y, 0, math.max(0, px(vp.Y - PUCK)))
+	)
+	puckHome = target
+
+	shellFadeTo(1, MIN_FADE)
+	chromeFadeTo(1, MIN_FADE)
+	local drift = tw(shell, TweenInfo.new(MIN_MOVE, Enum.EasingStyle.Quint, Enum.EasingDirection.In), {
+		Size = offset(size.X * 0.94, size.Y * 0.94),
+		Position = offset(pos.X + size.X * 0.03, pos.Y + size.Y * 0.03),
+	})
+
+	task.delay(MIN_FADE, function()
+		drift:Cancel()
+		shell.Visible = false
+		shell.Size = offset(size.X, size.Y)
+		shell.Position = offset(pos.X, pos.Y)
+		canvas.GroupTransparency = 0
+		shell.BackgroundTransparency = 0
+		shellStroke.Transparency = 0
+
+		puck.Position = offset(target.X, target.Y)
+		puckScale.Scale = 0.6
+		puckLetter.TextTransparency = 1
+		puck.Visible = true
+		tw(puckScale, MOTION.knob, { Scale = 1 })
+		tw(puckLetter, MOTION.enter, { TextTransparency = 0 })
+		animatingMinimize = false
+	end)
+end
+
+local function doRestore()
+	if not minimized or animatingMinimize then return end
+	animatingMinimize = true
+	minimized = false
+
+	local pPos = Vector2.new(puck.Position.X.Offset, puck.Position.Y.Offset)
+	puckHome = pPos
+
+	tw(puckLetter, MOTION.exit, { TextTransparency = 1 })
+	tw(puckScale, TweenInfo.new(0.14, Enum.EasingStyle.Quad, Enum.EasingDirection.In), { Scale = 0.6 })
+
+	task.delay(0.13, function()
+		puck.Visible = false
+		puckScale.Scale = 1
+
+		local vp = viewport()
+		local size = shellRect.size
+		local goal = fullscreen and shellRect.pos or Vector2.new(
+			math.clamp(px(pPos.X + PUCK / 2 - size.X / 2), 8, math.max(8, px(vp.X - size.X - 8))),
+			math.clamp(px(pPos.Y + PUCK / 2 - size.Y / 2), 8, math.max(8, px(vp.Y - size.Y - 8)))
+		)
+
+		shell.Size = offset(size.X * 0.94, size.Y * 0.94)
+
+-- Created by and originally uploaded by https://robloxscripts.com/user/Fleece
+
+		shell.Position = offset(goal.X + size.X * 0.03, goal.Y + size.Y * 0.03)
+		shellCorner.CornerRadius = UDim.new(0, 14)
+		canvas.GroupTransparency = 1
+		shell.BackgroundTransparency = 1
+		shellStroke.Transparency = 1
+		shell.Visible = true
+
+		tw(shell, TweenInfo.new(RES_MOVE, Enum.EasingStyle.Quint, Enum.EasingDirection.Out), {
+			Size = offset(size.X, size.Y),
+			Position = offset(goal.X, goal.Y),
+		})
+		chromeFadeTo(0, 0.16)
+		local done = shellFadeTo(0, RES_FADE)
+		done.Completed:Connect(function() animatingMinimize = false end)
+	end)
+end
+
+do
+	local function clampPuck(x, y)
+		local vp = viewport()
+		return Vector2.new(
+			math.clamp(px(x), 0, math.max(0, px(vp.X - PUCK))),
+			math.clamp(px(y), 0, math.max(0, px(vp.Y - PUCK)))
+		)
+	end
+
+	local moved, startPos, startMouse = false, nil, nil
+
+	puck.InputBegan:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.MouseButton1
+			or input.UserInputType == Enum.UserInputType.Touch then
+			moved = false
+			startPos = Vector2.new(puck.Position.X.Offset, puck.Position.Y.Offset)
+			startMouse = input.Position
+			tw(puck, MOTION.micro, { BackgroundColor3 = T.hover })
+			activeDrag = {
+				move = function(p)
+					local d = p - startMouse
+					if math.abs(d.X) > 3 or math.abs(d.Y) > 3 then moved = true end
+					local c = clampPuck(startPos.X + d.X, startPos.Y + d.Y)
+					puck.Position = offset(c.X, c.Y)
+				end,
+				finish = function()
+					tw(puck, MOTION.micro, { BackgroundColor3 = T.bg })
+					local c = clampPuck(puck.Position.X.Offset, puck.Position.Y.Offset)
+					puck.Position = offset(c.X, c.Y)
+					puckHome = c
+					if not moved then doRestore() end
+				end,
+			}
+		end
+	end)
+
+	puck.MouseEnter:Connect(function()
+		if activeDrag then return end
+		tw(puckStroke, MOTION.hover, { Color = T.hoverLine })
+		tw(puckScale, MOTION.hover, { Scale = 1.08 })
+	end)
+	puck.MouseLeave:Connect(function()
+		if activeDrag then return end
+		tw(puckStroke, MOTION.hover, { Color = T.shellLine })
+		tw(puckScale, MOTION.hover, { Scale = 1 })
+	end)
+
+	rootMaid:give(Workspace.CurrentCamera:GetPropertyChangedSignal("ViewportSize"):Connect(function()
+		if not minimized then return end
+		local c = clampPuck(puck.Position.X.Offset, puck.Position.Y.Offset)
+		puck.Position = offset(c.X, c.Y)
+		puckHome = c
+	end))
+end
+
+local uiToggleKey = Enum.KeyCode.RightShift
+
+local function trafficLight(color, order, onClick)
+	local b = new("TextButton", {
+		BackgroundColor3 = color,
+		AnchorPoint = Vector2.new(0, 0.5),
+		Size = offset(14, 14),
+		Text = "",
+		AutoButtonColor = false,
+		BorderSizePixel = 0,
+		LayoutOrder = order,
+		ZIndex = 13,
+		Parent = lightRow,
+	})
+	corner(b, 7)
+	local s = stroke(b, T.black, 1)
+	s.Transparency = 1
+
+	if TOUCH then
+		local grab = new("TextButton", {
+			BackgroundTransparency = 1,
+			Text = "",
+			AutoButtonColor = false,
+			AnchorPoint = Vector2.new(0.5, 0.5),
+			Position = UDim2.fromScale(0.5, 0.5),
+			Size = offset(34, 34),
+			ZIndex = 14,
+			Parent = b,
+		})
+		grab.Activated:Connect(function()
+			if closeActivePopup then closeActivePopup() end
+			onClick()
+		end)
+	end
+
+	b.MouseEnter:Connect(function()
+		tw(s, MOTION.hover, { Transparency = 0.6 })
+		tw(b, MOTION.hover, { Size = offset(16, 16) })
+	end)
+	b.MouseLeave:Connect(function()
+		tw(s, MOTION.hover, { Transparency = 1 })
+		tw(b, MOTION.hover, { Size = offset(14, 14) })
+	end)
+	b.MouseButton1Down:Connect(function()
+		tw(b, MOTION.micro, { Size = offset(12, 12) })
+	end)
+	b.Activated:Connect(function()
+		tw(b, MOTION.knob, { Size = offset(14, 14) })
+		if closeActivePopup then closeActivePopup() end
+		onClick()
+	end)
+	return b
+end
+
+local function fullscreenRect()
+	local vp = viewport()
+	local inset = GuiService:GetGuiInset()
+	return Vector2.new(0, px(inset.Y)), Vector2.new(px(vp.X), px(vp.Y - inset.Y))
+end
+
+trafficLight(T.green, 1, function()
+	if minimized or animatingMinimize then return end
+
+	if not fullscreen then
+		shellRect.pos = Vector2.new(shell.Position.X.Offset, shell.Position.Y.Offset)
+		shellRect.size = Vector2.new(shell.AbsoluteSize.X, shell.AbsoluteSize.Y)
+		fullscreen = true
+		local pos, size = fullscreenRect()
+		tw(shellCorner, MOTION.window, { CornerRadius = UDim.new(0, 0) })
+		tw(shell, MOTION.window, {
+			Size = offset(size.X, size.Y),
+			Position = offset(pos.X, pos.Y),
+		})
+	else
+		fullscreen = false
+		tw(shellCorner, MOTION.window, { CornerRadius = UDim.new(0, 14) })
+		tw(shell, MOTION.window, {
+			Size = offset(shellRect.size.X, shellRect.size.Y),
+			Position = offset(shellRect.pos.X, shellRect.pos.Y),
+		})
+	end
+end)
+
+trafficLight(T.yellow, 2, doMinimize)
+
+trafficLight(T.red, 3, function()
+	local w, h = shell.AbsoluteSize.X, shell.AbsoluteSize.Y
+	local pos = Vector2.new(shell.Position.X.Offset, shell.Position.Y.Offset)
+
+	tw(shell, TweenInfo.new(0.18, Enum.EasingStyle.Quint, Enum.EasingDirection.In), {
+		Size = offset(w * 0.95, h * 0.95),
+		Position = offset(pos.X + w * 0.025, pos.Y + h * 0.025),
+	})
+	chromeFadeTo(1, 0.18)
+	local out = shellFadeTo(1, 0.18)
+	out.Completed:Connect(function()
+		screen.Enabled = false
+		shell.Size = offset(w, h)
+		shell.Position = offset(pos.X, pos.Y)
+		canvas.GroupTransparency = 0
+		shell.BackgroundTransparency = 0
+		shellStroke.Transparency = 0
+	end)
+end)
+
+do
+	local startPos, startMouse
+	titleBar.InputBegan:Connect(function(input)
+		if fullscreen or animatingMinimize then return end
+		if input.UserInputType == Enum.UserInputType.MouseButton1
+			or input.UserInputType == Enum.UserInputType.Touch then
+			if closeActivePopup then closeActivePopup() end
+			startPos = Vector2.new(shell.Position.X.Offset, shell.Position.Y.Offset)
+			startMouse = input.Position
+			activeDrag = {
+				move = function(p)
+					local d = p - startMouse
+					shell.Position = offset(startPos.X + d.X, startPos.Y + d.Y)
+				end,
+				finish = function()
+					if not fullscreen then
+						shellRect.pos = Vector2.new(shell.Position.X.Offset, shell.Position.Y.Offset)
+					end
+				end,
+			}
+		end
+	end)
+end
+
+local sidebar = new("Frame", {
+	BackgroundTransparency = 1,
+	Size = UDim2.new(0, SIDEBAR_W, 1, 0),
+	ZIndex = 11,
+	Parent = contentHolder,
+})
+pad(sidebar, 16, 12, 14, 14)
+
+local tabLayer = new("Frame", {
+	BackgroundTransparency = 1,
+	Size = UDim2.new(1, 0, 1, -40),
+	ZIndex = 11,
+	Parent = sidebar,
+})
+
+local TAB_H, TAB_GAP = 42, 5
+
+local tabPill = new("Frame", {
+	BackgroundColor3 = T.optHover,
+	Size = UDim2.new(1, 0, 0, TAB_H),
+	Position = offset(0, 0),
+	BorderSizePixel = 0,
+	ZIndex = 11,
+	Parent = tabLayer,
+})
+corner(tabPill, 9)
+
+local tabScroller = new("ScrollingFrame", {
+	BackgroundTransparency = 1,
+	Size = UDim2.new(1, 0, 1, -40),
+	BorderSizePixel = 0,
+	ScrollBarThickness = 0,
+	CanvasSize = UDim2.new(),
+	AutomaticCanvasSize = Enum.AutomaticSize.Y,
+	ScrollingDirection = Enum.ScrollingDirection.Y,
+	ZIndex = 12,
+	Parent = sidebar,
+})
+vlist(tabScroller, TAB_GAP)
+
+local perfLabel = new("TextLabel", {
+	BackgroundTransparency = 1,
+	AnchorPoint = Vector2.new(0, 1),
+	Position = UDim2.new(0, 2, 1, 0),
+	Size = UDim2.new(1, 0, 0, 32),
+	Font = FONT_MONO,
+	Text = "",
+	TextSize = 11,
+	TextColor3 = T.tag,
+	TextXAlignment = Enum.TextXAlignment.Left,
+	ZIndex = 11,
+	Parent = sidebar,
+})
+
+local main = new("Frame", {
+	BackgroundTransparency = 1,
+	Position = offset(SIDEBAR_W, 0),
+	Size = UDim2.new(1, -SIDEBAR_W, 1, 0),
+	ZIndex = 11,
+	Parent = contentHolder,
+})
+pad(main, 16, 16, 10, 16)
+
+local searchWrap = new("Frame", {
+	BackgroundColor3 = T.field,
+	Size = UDim2.new(1, 0, 0, 38),
+	BorderSizePixel = 0,
+	ZIndex = 12,
+	Parent = main,
+})
+corner(searchWrap, 10)
+local searchStroke = stroke(searchWrap, T.fieldLine)
+pad(searchWrap, 0, 0, 14, 14)
+
+local searchBox = new("TextBox", {
+	BackgroundTransparency = 1,
+	Size = UDim2.fromScale(1, 1),
+	Font = FONT,
+	Text = "",
+	PlaceholderText = "Search features",
+	PlaceholderColor3 = T.tag,
+	TextSize = 15,
+	TextColor3 = T.text,
+	TextXAlignment = Enum.TextXAlignment.Left,
+	ClearTextOnFocus = false,
+	ZIndex = 13,
+	Parent = searchWrap,
+})
+searchBox.Focused:Connect(function() tw(searchStroke, MOTION.hover, { Color = T.white }) end)
+searchBox.FocusLost:Connect(function() tw(searchStroke, MOTION.hover, { Color = T.fieldLine }) end)
+
+local PAGE_Y = 50
+
+local page = new("ScrollingFrame", {
+	BackgroundTransparency = 1,
+	Position = offset(0, PAGE_Y),
+	Size = UDim2.new(1, 0, 1, -PAGE_Y),
+	BorderSizePixel = 0,
+	ScrollBarThickness = 6,
+	ScrollBarImageColor3 = T.scroll,
+	CanvasSize = UDim2.new(),
+	AutomaticCanvasSize = Enum.AutomaticSize.Y,
+	ScrollingDirection = Enum.ScrollingDirection.Y,
+	ZIndex = 11,
+	Parent = main,
+})
+vlist(page, 11)
+pad(page, 2, 24, 6, 14)
+
+local emptyState = new("TextLabel", {
+	BackgroundTransparency = 1,
+	Size = UDim2.new(1, 0, 0, 60),
+	Font = FONT,
+	Text = "No features match that search.",
+	TextSize = 15,
+	TextColor3 = T.tag,
+	Visible = false,
+	LayoutOrder = 99999,
+	ZIndex = 12,
+	Parent = page,
+})
+
+local TABS = {
+	"Movement", "Character", "Combat", "Visuals",
+	"World", "Teleport", "Server", "Config",
+}
+
+local currentTab = TABS[1]
+local tabButtons = {}
+local cards = {}
+local order = 0
+local searching = false
+
+local function refreshVisibility(animate)
+	local q = searchBox.Text:lower():gsub("^%s+", ""):gsub("%s+$", "")
+	searching = q ~= ""
+
+	local shown, index = 0, 0
+	for _, entry in ipairs(cards) do
+		local visible
+		if searching then
+			visible = entry.q:find(q, 1, true) ~= nil
+		else
+			visible = entry.tab == currentTab
+		end
+
+		if entry.chip then entry.chip.Visible = searching end
+
+		if visible then
+			shown += 1
+			if animate and entry.fade then
+
+				setFade(entry.fade, 1)
+				entry.frame.Visible = true
+				tweenFade(entry.fade, 0, MOTION.card, index * 0.028)
+				index += 1
+			else
+				if entry.fade then setFade(entry.fade, 0) end
+				entry.frame.Visible = true
+			end
+		else
+			entry.frame.Visible = false
+		end
+	end
+
+	emptyState.Visible = shown == 0
+
+	if animate then
+		page.Position = offset(0, PAGE_Y + 10)
+		tw(page, MOTION.card, { Position = offset(0, PAGE_Y) })
+	end
+
+	return shown
+end
+
+searchBox:GetPropertyChangedSignal("Text"):Connect(function()
+	refreshVisibility(false)
+end)
+
+local function movePill(index, instant)
+	local goal = offset(0, (index - 1) * (TAB_H + TAB_GAP))
+	if instant then
+		tabPill.Position = goal
+	else
+		tw(tabPill, MOTION.pill, { Position = goal })
+	end
+end
+
+local function makeTabButton(name, idx)
+	local b = new("TextButton", {
+		BackgroundColor3 = T.optHover,
+		BackgroundTransparency = 1,
+		Size = UDim2.new(1, 0, 0, TAB_H),
+		Text = "",
+		AutoButtonColor = false,
+		BorderSizePixel = 0,
+		LayoutOrder = idx,
+		ZIndex = 12,
+		Parent = tabScroller,
+	})
+	corner(b, 9)
+
+	local lbl = new("TextLabel", {
+		BackgroundTransparency = 1,
+		Size = UDim2.fromScale(1, 1),
+		Font = FONT_MED,
+		Text = name,
+		TextSize = 16,
+		TextColor3 = T.muted,
+		TextXAlignment = Enum.TextXAlignment.Center,
+		TextYAlignment = Enum.TextYAlignment.Center,
+		ZIndex = 13,
+		Parent = b,
+	})
+
+	b.MouseEnter:Connect(function()
+		if currentTab ~= name then
+			tw(b, MOTION.hover, { BackgroundTransparency = 0.6 })
+			tw(lbl, MOTION.hover, { TextColor3 = T.label })
+		end
+	end)
+	b.MouseLeave:Connect(function()
+		if currentTab ~= name then
+			tw(b, MOTION.hover, { BackgroundTransparency = 1 })
+			tw(lbl, MOTION.hover, { TextColor3 = T.muted })
+		end
+	end)
+	b.Activated:Connect(function()
+		if currentTab == name then return end
+		if closeActivePopup then closeActivePopup() end
+		currentTab = name
+		if searchBox.Text ~= "" then searchBox.Text = "" end
+		for tabName, entry in pairs(tabButtons) do
+			local on = tabName == name
+			tw(entry.btn, MOTION.hover, { BackgroundTransparency = 1 })
+			tw(entry.lbl, MOTION.hover, { TextColor3 = on and T.white or T.muted })
+		end
+		movePill(idx)
+		page.CanvasPosition = Vector2.new()
+		refreshVisibility(true)
+	end)
+
+	tabButtons[name] = { btn = b, lbl = lbl, index = idx }
+
+	task.defer(function()
+		if not lbl.Parent then return end
+		local slack = lbl.AbsoluteSize.X - lbl.TextBounds.X
+		if slack >= 0 and slack % 2 == 1 then
+			lbl.Size = UDim2.new(1, -1, 1, 0)
+		end
+	end)
+
+	return b
+end
+
+for i, name in ipairs(TABS) do makeTabButton(name, i) end
+tabButtons[currentTab].lbl.TextColor3 = T.white
+movePill(1, true)
+
+local MAX_POPUP_H = 280
+local OPT_H = 34
+
+local function Dropdown(parent, cfg)
+	local items = cfg.items
+	local value = cfg.value
+	local onChange = cfg.onChange
+
+	local function textFor(v)
+		for _, it in ipairs(items) do
+			if it.value == v then return it.text end
+		end
+		return tostring(v)
+	end
+
+	local btn = new("TextButton", {
+		BackgroundColor3 = T.field,
+		AnchorPoint = Vector2.new(0, 0.5),
+		Position = UDim2.new(0, 0, 0.5, 0),
+		Size = cfg.size or UDim2.new(1, 0, 0, 36),
+		Text = "",
+		AutoButtonColor = false,
+		BorderSizePixel = 0,
+		ZIndex = cfg.zindex or 14,
+		Parent = parent,
+	})
+	corner(btn, 10)
+	local bs = stroke(btn, T.fieldLine)
+	hoverable(btn, T.field, T.press, bs, T.fieldLine, T.hoverLine)
+
+	local lbl = new("TextLabel", {
+		BackgroundTransparency = 1,
+		Position = offset(13, 0),
+		Size = UDim2.new(1, -42, 1, 0),
+		Font = FONT_MED,
+		Text = textFor(value),
+		TextSize = 15,
+		TextColor3 = T.text,
+
+-- Created by and originally uploaded by https://robloxscripts.com/user/Fleece
+
+		TextXAlignment = Enum.TextXAlignment.Left,
+		TextTruncate = Enum.TextTruncate.AtEnd,
+		ZIndex = (cfg.zindex or 14) + 1,
+		Parent = btn,
+	})
+
+	local chev = new("Frame", {
+		BackgroundTransparency = 1,
+		AnchorPoint = Vector2.new(1, 0.5),
+		Position = UDim2.new(1, -14, 0.5, 0),
+		Size = offset(12, 12),
+		ZIndex = (cfg.zindex or 14) + 1,
+		Parent = btn,
+	})
+	local chevBars = {}
+	for i, rot in ipairs({ 45, -45 }) do
+		local bar = new("Frame", {
+			BackgroundColor3 = T.title,
+			AnchorPoint = Vector2.new(0.5, 0.5),
+			Position = UDim2.new(0.5, i == 1 and -3 or 3, 0.5, 0),
+			Size = offset(10, 2),
+			Rotation = rot,
+			BorderSizePixel = 0,
+			ZIndex = (cfg.zindex or 14) + 1,
+			Parent = chev,
+		})
+		corner(bar, 1)
+		chevBars[i] = bar
+	end
+
+	local popup = new("Frame", {
+		BackgroundColor3 = T.popup,
+		BorderSizePixel = 0,
+		Visible = false,
+		ZIndex = 520,
+		Parent = overlay,
+	})
+	corner(popup, 11)
+	stroke(popup, T.popupLine)
+
+	local scroller = new("ScrollingFrame", {
+		BackgroundTransparency = 1,
+		Position = offset(5, 5),
+		Size = UDim2.new(1, -10, 1, -10),
+		BorderSizePixel = 0,
+		ScrollBarThickness = 3,
+		ScrollBarImageColor3 = T.scroll,
+		CanvasSize = UDim2.new(),
+		AutomaticCanvasSize = Enum.AutomaticSize.Y,
+		ScrollingDirection = Enum.ScrollingDirection.Y,
+		ZIndex = 521,
+		Parent = popup,
+	})
+	vlist(scroller, 2)
+
+	local optionRows = {}
+	local popupFade = nil
+
+	local function paintSelection()
+		for _, row in ipairs(optionRows) do
+			local selected = row.item.value == value
+			row.selected = selected
+			row.btn.BackgroundTransparency = selected and 0.55 or 1
+			row.label.TextColor3 = row.item.locked and T.tag
+				or (selected and T.white or T.text)
+			row.label.Font = selected and FONT_MED or FONT
+		end
+	end
+
+	local function buildOptions()
+		for _, row in ipairs(optionRows) do row.btn:Destroy() end
+		table.clear(optionRows)
+
+		for i, it in ipairs(items) do
+			local ob = new("TextButton", {
+				BackgroundColor3 = T.optHover,
+				BackgroundTransparency = 1,
+				Size = UDim2.new(1, 0, 0, OPT_H),
+				Text = "",
+				AutoButtonColor = false,
+				BorderSizePixel = 0,
+				LayoutOrder = i,
+				ZIndex = 522,
+				Parent = scroller,
+			})
+			corner(ob, 7)
+			pad(ob, 0, 0, 11, 11)
+
+			local label = new("TextLabel", {
+				BackgroundTransparency = 1,
+				Size = it.note and UDim2.new(1, -134, 1, 0) or UDim2.new(1, 0, 1, 0),
+				Font = FONT,
+				Text = it.text,
+				TextSize = 15,
+				TextColor3 = T.text,
+				TextXAlignment = Enum.TextXAlignment.Left,
+				TextTruncate = Enum.TextTruncate.AtEnd,
+				ZIndex = 523,
+				Parent = ob,
+			})
+
+			if it.note then
+				new("TextLabel", {
+					BackgroundTransparency = 1,
+					AnchorPoint = Vector2.new(1, 0),
+					Position = UDim2.new(1, 0, 0, 0),
+					Size = UDim2.new(0, 128, 1, 0),
+					Font = FONT,
+					Text = it.note,
+					TextSize = 12,
+					TextColor3 = it.locked and T.red or T.tag,
+					TextXAlignment = Enum.TextXAlignment.Right,
+					TextTruncate = Enum.TextTruncate.AtEnd,
+					ZIndex = 523,
+					Parent = ob,
+				})
+			end
+
+			local row = { btn = ob, label = label, item = it, selected = false }
+			optionRows[i] = row
+
+			ob.MouseEnter:Connect(function()
+				tw(ob, MOTION.micro, { BackgroundTransparency = 0 })
+			end)
+			ob.MouseLeave:Connect(function()
+				tw(ob, MOTION.micro, { BackgroundTransparency = row.selected and 0.55 or 1 })
+			end)
+			ob.Activated:Connect(function()
+				if it.locked then
+					notify(("%s is unavailable, %s."):format(it.text, it.note or "unsupported"), "bad")
+					return
+				end
+				value = it.value
+				lbl.Text = it.text
+				paintSelection()
+				if closeActivePopup then closeActivePopup() end
+				if onChange then
+					local ok, err = pcall(onChange, value)
+					if not ok then notify("Error: " .. tostring(err), "bad", 6) end
+				end
+			end)
+		end
+
+		paintSelection()
+		popupFade = buildFade(popup)
+	end
+	buildOptions()
+
+	local open = false
+	local wheelConn = nil
+
+	local function close()
+		if not open then return end
+		open = false
+		closeActivePopup = nil
+		page.ScrollingEnabled = true
+		if wheelConn then
+			wheelConn:Disconnect()
+			wheelConn = nil
+		end
+
+		tw(chev, MOTION.enter, { Rotation = 0 })
+		tweenFade(popupFade, 1, MOTION.exit)
+		local cur = popup.Position
+		local out = tw(popup, MOTION.exit, {
+			Position = offset(cur.X.Offset, cur.Y.Offset - 6),
+		})
+		out.Completed:Connect(function()
+			if open then return end
+			popup.Visible = false
+			if not closeActivePopup then overlay.Visible = false end
+		end)
+	end
+
+	local function show()
+		if closeActivePopup then closeActivePopup() end
+		open = true
+		closeActivePopup = close
+
+		local contentH = #items * (OPT_H + 2) + 8
+		local height = math.min(contentH, MAX_POPUP_H)
+		local width = btn.AbsoluteSize.X
+
+		local ap = btn.AbsolutePosition - overlay.AbsolutePosition
+		local overlayH = overlay.AbsoluteSize.Y
+
+		local belowY = ap.Y + btn.AbsoluteSize.Y + 4
+		local finalY, startY
+		if belowY + height > overlayH - 10 then
+			finalY = math.max(10, ap.Y - height - 4)
+			startY = finalY + 10
+		else
+			finalY = belowY
+			startY = finalY - 10
+		end
+
+		popup.Size = offset(width, height)
+		popup.Position = offset(ap.X, startY)
+		popup.Visible = true
+		overlay.Visible = true
+		scroller.CanvasPosition = Vector2.new()
+
+		setFade(popupFade, 1)
+		tweenFade(popupFade, 0, MOTION.enter)
+		tw(chev, MOTION.enter, { Rotation = 180 })
+		tw(popup, MOTION.enter, { Position = offset(ap.X, finalY) })
+
+		page.ScrollingEnabled = false
+		wheelConn = UserInputService.InputChanged:Connect(function(input)
+			if input.UserInputType ~= Enum.UserInputType.MouseWheel then return end
+			local m = UserInputService:GetMouseLocation()
+			local p, s = popup.AbsolutePosition, popup.AbsoluteSize
+			local inside = m.X >= p.X and m.X <= p.X + s.X and m.Y >= p.Y and m.Y <= p.Y + s.Y
+			if inside then
+				local maxScroll = math.max(0, scroller.AbsoluteCanvasSize.Y - scroller.AbsoluteSize.Y)
+				scroller.CanvasPosition = Vector2.new(0, math.clamp(
+					scroller.CanvasPosition.Y - input.Position.Z * 42, 0, maxScroll
+				))
+			else
+				close()
+			end
+		end)
+	end
+
+	btn.Activated:Connect(function()
+		if open then close() else show() end
+	end)
+
+	return {
+		instance = btn,
+		get = function() return value end,
+		set = function(v, fire)
+			value = v
+			lbl.Text = textFor(v)
+			paintSelection()
+			if fire and onChange then pcall(onChange, v) end
+		end,
+		setItems = function(list, keepValue)
+			items = list
+			if not keepValue then
+				local stillValid = false
+				for _, it in ipairs(list) do
+					if it.value == value then stillValid = true break end
+				end
+				if not stillValid and list[1] then
+					value = list[1].value
+					lbl.Text = list[1].text
+					if onChange then pcall(onChange, value) end
+				end
+			end
+			buildOptions()
+		end,
+		close = close,
+	}
+end
+
+local function Toggle(parent, cfg)
+	local state = cfg.value and true or false
+
+	local btn = new("TextButton", {
+		BackgroundColor3 = state and T.white or T.field,
+		AnchorPoint = Vector2.new(0, 0.5),
+		Position = UDim2.new(0, 0, 0.5, 0),
+		Size = offset(44, 24),
+		Text = "",
+		AutoButtonColor = false,
+		BorderSizePixel = 0,
+		ZIndex = cfg.zindex or 14,
+		Parent = parent,
+	})
+	corner(btn, 12)
+	local s = stroke(btn, state and T.white or T.fieldLine)
+
+	local knob = new("Frame", {
+		BackgroundColor3 = state and T.black or T.muted,
+		AnchorPoint = Vector2.new(0, 0.5),
+		Position = UDim2.new(0, state and 23 or 3, 0.5, 0),
+		Size = offset(18, 18),
+		BorderSizePixel = 0,
+		ZIndex = (cfg.zindex or 14) + 1,
+		Parent = btn,
+	})
+	corner(knob, 9)
+
+	local api = {}
+
+	local function render(v, animate)
+		state = v and true or false
+		local info = animate == false and MOTION.micro or MOTION.knob
+		tw(btn, MOTION.hover, { BackgroundColor3 = state and T.white or T.field })
+		tw(s, MOTION.hover, { Color = state and T.white or T.fieldLine })
+		tw(knob, info, {
+			Position = UDim2.new(0, state and 23 or 3, 0.5, 0),
+			BackgroundColor3 = state and T.black or T.muted,
+		})
+	end
+
+	function api.get() return state end
+	function api.set(v) render(v) end
+
+	btn.MouseButton1Down:Connect(function()
+		tw(knob, MOTION.micro, { Size = offset(20, 18) })
+	end)
+
+	btn.Activated:Connect(function()
+		tw(knob, MOTION.knob, { Size = offset(18, 18) })
+
+		local want = not state
+		if not cfg.onChange then
+			render(want)
+			return
+		end
+		local ok, result = pcall(cfg.onChange, want)
+		if not ok then
+			notify("Error: " .. tostring(result), "bad", 6)
+			render(state)
+			return
+		end
+		if result == false then
+			render(state)
+		else
+			render(want)
+		end
+	end)
+
+	api.instance = btn
+	return api
+end
+
+local function Slider(parent, cfg)
+	local min, max = cfg.min or 0, cfg.max or 100
+	local step = cfg.step or 1
+	local value = math.clamp(cfg.value or min, min, max)
+
+	local holder = new("Frame", {
+		BackgroundTransparency = 1,
+		AnchorPoint = Vector2.new(0, 0.5),
+		Position = UDim2.new(0, 0, 0.5, 0),
+		Size = UDim2.new(1, 0, 0, 24),
+		ZIndex = cfg.zindex or 14,
+		Parent = parent,
+	})
+
+	local valueLabel = new("TextLabel", {
+		BackgroundTransparency = 1,
+		AnchorPoint = Vector2.new(1, 0),
+		Position = UDim2.new(1, 0, 0, 0),
+		Size = UDim2.new(0, 56, 1, 0),
+		Font = FONT_MONO,
+		Text = tostring(value),
+		TextSize = 13,
+		TextColor3 = T.muted,
+		TextXAlignment = Enum.TextXAlignment.Right,
+		ZIndex = (cfg.zindex or 14) + 1,
+		Parent = holder,
+	})
+
+	local track = new("Frame", {
+		BackgroundColor3 = T.track,
+		AnchorPoint = Vector2.new(0, 0.5),
+		Position = UDim2.new(0, 0, 0.5, 0),
+		Size = UDim2.new(1, -66, 0, 6),
+		BorderSizePixel = 0,
+		ZIndex = (cfg.zindex or 14) + 1,
+		Parent = holder,
+	})
+	corner(track, 3)
+
+	local hit = new("TextButton", {
+		BackgroundTransparency = 1,
+		Text = "",
+		AutoButtonColor = false,
+		AnchorPoint = Vector2.new(0.5, 0.5),
+		Position = UDim2.fromScale(0.5, 0.5),
+		Size = UDim2.new(1, 14, 0, 26),
+		ZIndex = (cfg.zindex or 14) + 4,
+		Parent = track,
+	})
+
+	local fill = new("Frame", {
+		BackgroundColor3 = T.white,
+		Size = UDim2.fromScale((value - min) / (max - min), 1),
+		BorderSizePixel = 0,
+		ZIndex = (cfg.zindex or 14) + 2,
+		Parent = track,
+	})
+	corner(fill, 3)
+
+	local knob = new("Frame", {
+		BackgroundColor3 = T.white,
+		AnchorPoint = Vector2.new(0.5, 0.5),
+		Position = UDim2.new((value - min) / (max - min), 0, 0.5, 0),
+		Size = offset(14, 14),
+		BorderSizePixel = 0,
+		ZIndex = (cfg.zindex or 14) + 3,
+		Parent = track,
+	})
+	corner(knob, 7)
+
+	local function fmt(v)
+		if step < 1 then return string.format("%.2f", v) end
+		return tostring(math.floor(v + 0.5))
+	end
+
+	local dragging = false
+
+	local function apply(v, fire, animate)
+		if type(v) ~= "number" or v ~= v then return end
+		v = math.clamp(v, min, max)
+		v = math.floor(v / step + 0.5) * step
+		value = math.clamp(v, min, max)
+		local alpha = (value - min) / (max - min)
+
+		local width = track.AbsoluteSize.X
+		local filled = px(alpha * width)
+		local goalFill = width > 0 and UDim2.fromOffset(filled, 6) or UDim2.fromScale(alpha, 1)
+		local goalKnob = width > 0 and UDim2.new(0, filled, 0.5, 0) or UDim2.new(alpha, 0, 0.5, 0)
+
+		if animate then
+			tw(fill, MOTION.enter, { Size = goalFill })
+			tw(knob, MOTION.enter, { Position = goalKnob })
+		else
+			fill.Size = goalFill
+			knob.Position = goalKnob
+		end
+
+		valueLabel.Text = fmt(value)
+		if fire and cfg.onChange then
+			local ok, err = pcall(cfg.onChange, value)
+			if not ok then local _ = err end
+		end
+	end
+	apply(value, false, false)
+
+	rootMaid:give(track:GetPropertyChangedSignal("AbsoluteSize"):Connect(function()
+		apply(value, false, false)
+	end))
+
+	local function fromX(x)
+		local w = track.AbsoluteSize.X
+		if w <= 0 then return end
+		local alpha = math.clamp((x - track.AbsolutePosition.X) / w, 0, 1)
+		apply(min + alpha * (max - min), true, false)
+	end
+
+	hit.MouseEnter:Connect(function()
+		if not dragging then tw(knob, MOTION.hover, { Size = offset(16, 16) }) end
+	end)
+	hit.MouseLeave:Connect(function()
+		if not dragging then tw(knob, MOTION.hover, { Size = offset(14, 14) }) end
+	end)
+
+	hit.InputBegan:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.MouseButton1
+			or input.UserInputType == Enum.UserInputType.Touch then
+			if closeActivePopup then closeActivePopup() end
+			dragging = true
+			tw(knob, MOTION.knob, { Size = offset(18, 18) })
+			fromX(input.Position.X)
+			activeDrag = {
+				move = function(p) fromX(p.X) end,
+				finish = function()
+					dragging = false
+					tw(knob, MOTION.enter, { Size = offset(14, 14) })
+				end,
+			}
+		end
+	end)
+
+	return {
+		instance = holder,
+		get = function() return value end,
+		set = function(v, fire) apply(v, fire, true) end,
+	}
+end
+
+local function Button(parent, cfg)
+	local primary = cfg.primary
+	local b = new("TextButton", {
+		BackgroundColor3 = primary and T.white or T.button,
+		Size = cfg.size or UDim2.new(1, 0, 0, primary and 38 or 36),
+		Text = cfg.text,
+		Font = FONT_MED,
+		TextSize = 15,
+		TextColor3 = primary and T.black or T.text,
+		AutoButtonColor = false,
+		BorderSizePixel = 0,
+		LayoutOrder = cfg.order or 1,
+		ZIndex = cfg.zindex or 14,
+		Parent = parent,
+	})
+	corner(b, 10)
+
+	if primary then
+		hoverable(b, T.white, T.dim)
+	else
+		local s = stroke(b, T.buttonLine)
+		hoverable(b, T.button, T.hover, s, T.buttonLine, T.hoverLine)
+	end
+
+-- Created by and originally uploaded by https://robloxscripts.com/user/Fleece
+
+
+	local scale = new("UIScale", { Scale = 1, Parent = b })
+	b.MouseButton1Down:Connect(function()
+		tw(scale, MOTION.micro, { Scale = 0.97 })
+	end)
+	b.MouseButton1Up:Connect(function()
+		tw(scale, MOTION.knob, { Scale = 1 })
+	end)
+	b.MouseLeave:Connect(function()
+		tw(scale, MOTION.micro, { Scale = 1 })
+	end)
+
+	b.Activated:Connect(function()
+		if closeActivePopup then closeActivePopup() end
+		local ok, err = pcall(cfg.onClick)
+		if not ok then notify("Error: " .. tostring(err), "bad", 6) end
+	end)
+	return b
+end
+
+local function TextField(parent, cfg)
+	local wrap = new("Frame", {
+		BackgroundColor3 = T.field,
+		Size = cfg.size or UDim2.new(1, 0, 0, 36),
+		BorderSizePixel = 0,
+		LayoutOrder = cfg.order or 1,
+		ZIndex = cfg.zindex or 14,
+		Parent = parent,
+	})
+	corner(wrap, 10)
+	local s = stroke(wrap, T.fieldLine)
+	pad(wrap, 0, 0, 13, 13)
+
+	local box = new("TextBox", {
+		BackgroundTransparency = 1,
+		Size = UDim2.fromScale(1, 1),
+		Font = FONT,
+		Text = cfg.value or "",
+		PlaceholderText = cfg.placeholder or "",
+		PlaceholderColor3 = T.tag,
+		TextSize = 14,
+		TextColor3 = T.text,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		ClearTextOnFocus = false,
+		ZIndex = (cfg.zindex or 14) + 1,
+		Parent = wrap,
+	})
+	box.Focused:Connect(function() tw(s, MOTION.hover, { Color = T.white }) end)
+	box.FocusLost:Connect(function(enter)
+		tw(s, MOTION.hover, { Color = T.fieldLine })
+		if enter and cfg.onEnter then pcall(cfg.onEnter, box.Text) end
+	end)
+	return { instance = wrap, box = box, get = function() return box.Text end }
+end
+
+local listening = nil
+
+local function KeybindPicker(parent, cfg)
+	local key = cfg.value
+	local b = new("TextButton", {
+		BackgroundColor3 = T.button,
+		AnchorPoint = cfg.anchor or Vector2.new(0, 0),
+		Position = cfg.position or UDim2.new(0, 0, 0, 0),
+		Size = UDim2.new(0, cfg.width or 92, 1, 0),
+		Text = key and key.Name or "None",
+		Font = FONT_MED,
+		TextSize = 13,
+		TextColor3 = key and T.title or T.tag,
+		TextXAlignment = Enum.TextXAlignment.Center,
+		TextYAlignment = Enum.TextYAlignment.Center,
+		TextTruncate = Enum.TextTruncate.AtEnd,
+		AutoButtonColor = false,
+		BorderSizePixel = 0,
+		ZIndex = cfg.zindex or 14,
+		Parent = parent,
+	})
+	corner(b, 8)
+	local s = stroke(b, T.buttonLine)
+	hoverable(b, T.button, T.hover, s, T.buttonLine, T.hoverLine)
+
+	local api = {}
+
+	local function render()
+		b.Text = key and key.Name or "None"
+		b.TextColor3 = key and T.title or T.tag
+		tw(s, MOTION.hover, { Color = T.buttonLine })
+	end
+
+	b.Activated:Connect(function()
+		if listening then listening.cancel() end
+		b.Text = "press a key"
+		b.TextColor3 = T.yellow
+		tw(s, MOTION.hover, { Color = T.yellow })
+		listening = {
+			apply = function(code)
+				listening = nil
+				if code == Enum.KeyCode.Escape or code == Enum.KeyCode.Backspace then
+					key = nil
+				else
+					key = code
+				end
+				render()
+				if cfg.onChange then cfg.onChange(key) end
+			end,
+			cancel = function()
+				listening = nil
+				render()
+			end,
+		}
+	end)
+
+	api.instance = b
+	api.get = function() return key end
+	api.set = function(k) key = k render() end
+	return api
+end
+
+local function confirmDialog(title, body, confirmText, onConfirm)
+	local dim = new("TextButton", {
+		BackgroundColor3 = T.black,
+		BackgroundTransparency = 1,
+		Size = UDim2.fromScale(1, 1),
+		Text = "",
+		AutoButtonColor = false,
+		ZIndex = 700,
+		Parent = screen,
+	})
+
+	local box = new("CanvasGroup", {
+		BackgroundColor3 = T.panel,
+		AnchorPoint = Vector2.new(0.5, 0.5),
+		Position = UDim2.fromScale(0.5, 0.5),
+		Size = offset(360, 0),
+		AutomaticSize = Enum.AutomaticSize.Y,
+		GroupTransparency = 1,
+		BorderSizePixel = 0,
+		ZIndex = 701,
+		Parent = dim,
+	})
+	corner(box, 16)
+	stroke(box, T.panelLine)
+	pad(box, 20, 18, 20, 20)
+	vlist(box, 12)
+
+	new("TextLabel", {
+		BackgroundTransparency = 1,
+		Size = UDim2.new(1, 0, 0, 20),
+		Font = FONT_BOLD,
+		Text = title,
+		TextSize = 16,
+		TextColor3 = T.text,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		LayoutOrder = 1,
+		ZIndex = 702,
+		Parent = box,
+	})
+
+	new("TextLabel", {
+		BackgroundTransparency = 1,
+		Size = UDim2.new(1, 0, 0, 0),
+		AutomaticSize = Enum.AutomaticSize.Y,
+		Font = FONT,
+		Text = body,
+		TextSize = 14,
+		TextColor3 = T.note,
+		TextWrapped = true,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		LayoutOrder = 2,
+		ZIndex = 702,
+		Parent = box,
+	})
+
+	local row = new("Frame", {
+		BackgroundTransparency = 1,
+		Size = UDim2.new(1, 0, 0, 38),
+		LayoutOrder = 3,
+		ZIndex = 702,
+		Parent = box,
+	})
+	hlist(row, 10)
+
+	local scale = new("UIScale", { Scale = 0.94, Parent = box })
+
+	local function close(run)
+		tw(scale, TweenInfo.new(0.12, Enum.EasingStyle.Quad, Enum.EasingDirection.In), { Scale = 0.94 })
+		tw(dim, MOTION.exit, { BackgroundTransparency = 1 })
+		local out = tw(box, MOTION.exit, { GroupTransparency = 1 })
+		out.Completed:Connect(function()
+			dim:Destroy()
+			if run then task.defer(onConfirm) end
+		end)
+	end
+
+	Button(row, {
+		text = "Cancel", order = 1, zindex = 703,
+		size = UDim2.new(0.5, -5, 0, 38),
+		onClick = function() close(false) end,
+	})
+	Button(row, {
+		text = confirmText, order = 2, primary = true, zindex = 703,
+		size = UDim2.new(0.5, -5, 0, 38),
+		onClick = function() close(true) end,
+	})
+
+	dim.Activated:Connect(function() close(false) end)
+
+	tw(dim, MOTION.enter, { BackgroundTransparency = 0.45 })
+	tw(box, MOTION.enter, { GroupTransparency = 0 })
+	tw(scale, MOTION.knob, { Scale = 1 })
+end
+
+local function makeCard(tab, title, desc)
+	order += 1
+	local card = new("Frame", {
+		BackgroundColor3 = T.panel,
+		Size = UDim2.new(1, 0, 0, 0),
+		AutomaticSize = Enum.AutomaticSize.Y,
+		BorderSizePixel = 0,
+		LayoutOrder = order,
+		Visible = tab == currentTab,
+		ZIndex = 12,
+		Parent = page,
+	})
+	corner(card, 14)
+	local cardStroke = stroke(card, T.panelLine)
+	pad(card, 15, 15, 17, 17)
+	vlist(card, 11)
+
+	local head = new("Frame", {
+		BackgroundTransparency = 1,
+		Size = UDim2.new(1, 0, 0, desc and 42 or 24),
+		LayoutOrder = 1,
+		ZIndex = 13,
+		Parent = card,
+	})
+
+	new("TextLabel", {
+		BackgroundTransparency = 1,
+		Size = UDim2.new(1, -150, 0, 18),
+		Font = FONT_BOLD,
+		Text = title,
+		TextSize = 16,
+		TextColor3 = T.text,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		TextTruncate = Enum.TextTruncate.AtEnd,
+		ZIndex = 14,
+		Parent = head,
+	})
+
+	if desc then
+		new("TextLabel", {
+			BackgroundTransparency = 1,
+			Position = offset(0, 22),
+			Size = UDim2.new(1, -150, 0, 18),
+			Font = FONT,
+			Text = desc,
+			TextSize = 13,
+			TextColor3 = T.note,
+			TextXAlignment = Enum.TextXAlignment.Left,
+			TextTruncate = Enum.TextTruncate.AtEnd,
+			ZIndex = 14,
+			Parent = head,
+		})
+	end
+
+	local chip = new("Frame", {
+		BackgroundColor3 = T.optHover,
+		AnchorPoint = Vector2.new(1, 0),
+		Position = UDim2.new(1, -120, 0, 1),
+		Size = offset(0, 18),
+		AutomaticSize = Enum.AutomaticSize.X,
+		BorderSizePixel = 0,
+		Visible = false,
+		ZIndex = 14,
+		Parent = head,
+	})
+	corner(chip, 5)
+	pad(chip, 0, 0, 7, 7)
+	new("TextLabel", {
+		BackgroundTransparency = 1,
+		Size = UDim2.new(0, 0, 1, 0),
+		AutomaticSize = Enum.AutomaticSize.X,
+		Font = FONT_MED,
+		Text = tab,
+		TextSize = 11,
+		TextColor3 = T.note,
+		ZIndex = 15,
+		Parent = chip,
+	})
+
+	card.MouseEnter:Connect(function()
+		tw(cardStroke, MOTION.hover, { Color = Color3.fromHex("3a3a3a") })
+	end)
+	card.MouseLeave:Connect(function()
+		tw(cardStroke, MOTION.hover, { Color = T.panelLine })
+	end)
+
+	local entry = {
+		frame = card,
+		tab = tab,
+		chip = chip,
+		fade = nil,
+		q = (tab .. " " .. title .. " " .. (desc or "")):lower(),
+	}
+	table.insert(cards, entry)
+
+	return card, head, entry
+end
+
+local function labelRow(parent, text, orderIdx, height)
+	local row = new("Frame", {
+		BackgroundTransparency = 1,
+		Size = UDim2.new(1, 0, 0, height or 36),
+		LayoutOrder = orderIdx or 2,
+		ZIndex = 13,
+		Parent = parent,
+	})
+	new("TextLabel", {
+		BackgroundTransparency = 1,
+		Size = offset(96, height or 36),
+		Font = FONT_MED,
+		Text = text,
+		TextSize = 14,
+		TextColor3 = T.label,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		ZIndex = 14,
+		Parent = row,
+	})
+	local slot = new("Frame", {
+		BackgroundTransparency = 1,
+		Position = offset(102, 0),
+		Size = UDim2.new(1, -102, 1, 0),
+		ZIndex = 13,
+		Parent = row,
+	})
+	return slot, row
+end
+
+local Runtime = { active = {}, state = {}, onChanged = nil }
+local Features = {}
+local featureOrder = {}
+
+local Mobile
+
+local everySeq = 0
+
+local function ctxFor(id, methodDef)
+	local maid = Maid.new()
+	local restorer = Restorer()
+	maid:give(function() restorer.restoreAll() end)
+
+	local ctx = {
+		maid = maid,
+		s = Runtime.state[id].settings,
+		method = methodDef,
+		notify = notify,
+		restorer = restorer,
+	}
+
+	function ctx:every(bucket, fn)
+		everySeq += 1
+		local key = ("%s:%s:%d"):format(id, bucket, everySeq)
+		Scheduler.add(bucket, key, fn, function(err)
+			notify(("%s stopped, %s"):format(Features[id].name, tostring(err)), "bad", 7)
+			task.spawn(function()
+				Runtime.setEnabled(id, false)
+				if Runtime.onChanged then Runtime.onChanged(id, false) end
+			end)
+		end)
+		maid:give(function() Scheduler.remove(bucket, key) end)
+	end
+
+	function ctx:throttled(bucket, interval, fn)
+		local acc = interval
+		self:every(bucket, function(dt)
+			acc += dt
+			if acc >= interval then
+				local used = acc
+				acc = 0
+				fn(used)
+			end
+		end)
+	end
+
+	function ctx:restore(obj, prop)
+		restorer.set(obj, prop, obj[prop])
+	end
+
+	function ctx:set(obj, prop, value)
+		restorer.set(obj, prop, value)
+	end
+
+	return ctx
+end
+
+function Runtime.register(def)
+	Features[def.id] = def
+	table.insert(featureOrder, def.id)
+	Runtime.state[def.id] = {
+		enabled = false,
+		method = def.methods[1].id,
+		settings = {},
+		keybind = nil,
+	}
+	for key, meta in pairs(def.settings or {}) do
+		Runtime.state[def.id].settings[key] = meta.default
+	end
+end
+
+local function methodById(def, mid)
+	for _, m in ipairs(def.methods) do
+		if m.id == mid then return m end
+	end
+	return def.methods[1]
+end
+
+function Runtime.stop(id)
+	local live = Runtime.active[id]
+	if not live then return end
+	Runtime.active[id] = nil
+	if live.method.stop then
+		local ok, err = pcall(live.method.stop, live.ctx)
+		if not ok then local _ = err end
+	end
+	live.ctx.maid:clean()
+end
+
+function Runtime.start(id)
+	local def = Features[id]
+	if not def then return false end
+	local st = Runtime.state[id]
+	local m = methodById(def, st.method)
+
+	local ok, missing = capable(m.needs)
+	if not ok then
+		notify(("%s > %s needs %s(), which this executor doesn't have."):format(def.name, m.name, missing), "bad", 6)
+		return false
+	end
+
+	if m.requiresChar ~= false and not alive() then
+		notify(("%s needs a living character."):format(def.name), "warn")
+		return false
+	end
+
+	for _, otherId in ipairs(def.conflicts or {}) do
+		if Runtime.active[otherId] then
+			notifyThrottled("conflict:" .. id, 8,
+				("%s and %s both control the same properties, expect odd behaviour.")
+					:format(def.name, Features[otherId] and Features[otherId].name or otherId), "warn")
+		end
+	end
+
+	Runtime.stop(id)
+
+	local ctx = ctxFor(id, m)
+	local started, err = pcall(m.start, ctx)
+	if not started then
+		ctx.maid:clean()
+		notify(("%s > %s failed: %s"):format(def.name, m.name, tostring(err)), "bad", 7)
+		return false
+	end
+
+	if def.mobileVertical and Mobile then
+		Mobile.request(true)
+		ctx.maid:give(function() Mobile.request(false) end)
+	end
+
+	Runtime.active[id] = { ctx = ctx, method = m }
+	return true
+end
+
+function Runtime.setEnabled(id, on)
+	local st = Runtime.state[id]
+	if not st then return false end
+	if on then
+		if Runtime.start(id) then
+			st.enabled = true
+			return true
+		end
+		st.enabled = false
+		return false
+	end
+	Runtime.stop(id)
+	st.enabled = false
+	return true
+end
+
+function Runtime.setMethod(id, mid)
+	local st = Runtime.state[id]
+	if not st then return false end
+	local wasEnabled = st.enabled
+	st.method = mid
+	if wasEnabled then
+		Runtime.stop(id)
+		if not Runtime.start(id) then
+			st.enabled = false
+			return false
+		end
+
+-- Created by and originally uploaded by https://robloxscripts.com/user/Fleece
+
+	end
+	return true
+end
+
+table.insert(Char.onRespawn, function()
+	local wanted = {}
+	for id, st in pairs(Runtime.state) do
+		if st.enabled then table.insert(wanted, id) end
+	end
+	if #wanted == 0 then return end
+
+	if not awaitAlive(8) then
+		for _, id in ipairs(wanted) do
+			Runtime.setEnabled(id, false)
+			if Runtime.onChanged then Runtime.onChanged(id, false) end
+		end
+		notify("Character never became ready, features were turned off.", "warn", 6)
+		return
+	end
+
+	task.wait(0.25)
+	for _, id in ipairs(wanted) do
+		Runtime.stop(id)
+		if not Runtime.start(id) then
+			Runtime.state[id].enabled = false
+			if Runtime.onChanged then Runtime.onChanged(id, false) end
+		end
+	end
+end)
+
+local uiHandles = {}
+local featureBinds = {}
+
+Runtime.onChanged = function(id, enabled)
+	local h = uiHandles[id]
+	if h and h.toggle then h.toggle.set(enabled) end
+end
+
+local function renderFeature(def)
+	local card, head = makeCard(def.category, def.name, def.desc)
+	local st = Runtime.state[def.id]
+	local handles = { settings = {} }
+	uiHandles[def.id] = handles
+
+	local toggleHolder = new("Frame", {
+		BackgroundTransparency = 1,
+		AnchorPoint = Vector2.new(1, 0),
+		Position = UDim2.new(1, 0, 0, 0),
+		Size = offset(44, 24),
+		ZIndex = 14,
+		Parent = head,
+	})
+	handles.toggle = Toggle(toggleHolder, {
+		value = false,
+		zindex = 15,
+		onChange = function(want) return Runtime.setEnabled(def.id, want) end,
+	})
+
+	local bindHolder = new("Frame", {
+		BackgroundTransparency = 1,
+		AnchorPoint = Vector2.new(1, 0),
+		Position = UDim2.new(1, -54, 0, -3),
+		Size = offset(68, 30),
+		ZIndex = 14,
+		Parent = head,
+	})
+	handles.keybind = KeybindPicker(bindHolder, {
+		value = nil,
+		width = 68,
+		zindex = 15,
+		onChange = function(k)
+			for code, boundId in pairs(featureBinds) do
+				if boundId == def.id then featureBinds[code] = nil end
+			end
+			st.keybind = k and k.Name or nil
+			if k then
+				featureBinds[k] = def.id
+				notify(("%s bound to %s."):format(def.name, k.Name))
+			end
+		end,
+	})
+
+	local items = {}
+	for _, m in ipairs(def.methods) do
+		local ok, missing = capable(m.needs)
+		table.insert(items, {
+			value = m.id,
+			text = m.name,
+			note = (not ok) and ("needs " .. missing) or m.tag,
+			locked = not ok,
+		})
+	end
+
+	local methodSlot = labelRow(card, "Method", 2)
+	handles.method = Dropdown(methodSlot, {
+		items = items,
+		value = st.method,
+		zindex = 15,
+		onChange = function(mid)
+			if not Runtime.setMethod(def.id, mid) then
+				handles.toggle.set(false)
+			end
+		end,
+	})
+
+	local idx = 3
+	for _, key in ipairs(def.settingOrder or {}) do
+		local meta = (def.settings or {})[key]
+		if meta then
+			idx += 1
+			if meta.type == "slider" then
+				local slot = labelRow(card, meta.label, idx)
+				handles.settings[key] = Slider(slot, {
+					min = meta.min, max = meta.max, step = meta.step,
+					value = meta.default, zindex = 15,
+					onChange = function(v) st.settings[key] = v end,
+				})
+			elseif meta.type == "toggle" then
+				local slot = labelRow(card, meta.label, idx, 28)
+				handles.settings[key] = Toggle(slot, {
+					value = meta.default, zindex = 15,
+					onChange = function(v)
+						st.settings[key] = v
+						if meta.restart and st.enabled then
+							if not Runtime.setMethod(def.id, st.method) then
+								handles.toggle.set(false)
+							end
+						end
+						return true
+					end,
+				})
+			elseif meta.type == "dropdown" then
+				local slot = labelRow(card, meta.label, idx)
+				handles.settings[key] = Dropdown(slot, {
+					items = meta.items, value = meta.default, zindex = 15,
+					onChange = function(v) st.settings[key] = v end,
+				})
+			end
+		end
+	end
+
+	if def.actions then
+		idx += 1
+		local row = new("Frame", {
+			BackgroundTransparency = 1,
+			Size = UDim2.new(1, 0, 0, 34),
+			LayoutOrder = idx,
+			ZIndex = 13,
+			Parent = card,
+		})
+		hlist(row, 8)
+		local n = #def.actions
+		for i, act in ipairs(def.actions) do
+			Button(row, {
+				text = act.text,
+				order = i,
+				zindex = 14,
+				size = UDim2.new(1 / n, -(8 * (n - 1) / n), 0, 34),
+				onClick = act.run,
+			})
+		end
+	end
+
+	return card
+end
+
+local function camera()
+	return Workspace.CurrentCamera
+end
+
+local function typing()
+	return UserInputService:GetFocusedTextBox() ~= nil
+end
+
+Mobile = {
+	touch = UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled,
+	vertical = 0,
+	consumers = 0,
+}
+
+local mobilePad = new("Frame", {
+	BackgroundTransparency = 1,
+	AnchorPoint = Vector2.new(1, 1),
+	Position = UDim2.new(1, -24, 1, -150),
+	Size = offset(72, 158),
+	Visible = false,
+	ZIndex = 400,
+	Parent = screen,
+})
+vlist(mobilePad, 10)
+
+local function padButton(label, order, axis)
+	local b = new("TextButton", {
+		BackgroundColor3 = T.panel,
+		Size = offset(72, 72),
+		Text = label,
+		Font = FONT_BOLD,
+		TextSize = 26,
+		TextColor3 = T.text,
+		AutoButtonColor = false,
+		BorderSizePixel = 0,
+		LayoutOrder = order,
+		ZIndex = 401,
+		Parent = mobilePad,
+	})
+	corner(b, 18)
+	local s = stroke(b, T.panelLine)
+
+	local function press()
+		Mobile.vertical = axis
+		tw(b, MOTION.micro, { BackgroundColor3 = T.white, TextColor3 = T.black })
+		tw(s, MOTION.micro, { Color = T.white })
+	end
+	local function release()
+		if Mobile.vertical == axis then Mobile.vertical = 0 end
+		tw(b, MOTION.enter, { BackgroundColor3 = T.panel, TextColor3 = T.text })
+		tw(s, MOTION.enter, { Color = T.panelLine })
+	end
+
+	b.InputBegan:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.Touch
+			or input.UserInputType == Enum.UserInputType.MouseButton1 then press() end
+	end)
+	b.InputEnded:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.Touch
+			or input.UserInputType == Enum.UserInputType.MouseButton1 then release() end
+	end)
+	b.MouseLeave:Connect(release)
+	return b
+end
+
+padButton("+", 1, 1)
+padButton("−", 2, -1)
+
+function Mobile.request(on)
+	Mobile.consumers = math.max(0, Mobile.consumers + (on and 1 or -1))
+	local show = Mobile.touch and Mobile.consumers > 0
+	if show == mobilePad.Visible then return end
+	if show then
+		mobilePad.Visible = true
+		mobilePad.Position = UDim2.new(1, -24, 1, -130)
+		tw(mobilePad, MOTION.enter, { Position = UDim2.new(1, -24, 1, -150) })
+	else
+		Mobile.vertical = 0
+		mobilePad.Visible = false
+	end
+end
+
+local function moveDir(includeVertical)
+	local cam = camera()
+	if not cam then return Vector3.zero end
+	local cf = cam.CFrame
+	local d = Vector3.zero
+
+	if not typing() then
+		if UserInputService:IsKeyDown(Enum.KeyCode.W) then d += cf.LookVector end
+		if UserInputService:IsKeyDown(Enum.KeyCode.S) then d -= cf.LookVector end
+		if UserInputService:IsKeyDown(Enum.KeyCode.A) then d -= cf.RightVector end
+		if UserInputService:IsKeyDown(Enum.KeyCode.D) then d += cf.RightVector end
+		if includeVertical then
+			if UserInputService:IsKeyDown(Enum.KeyCode.Space) then d += Vector3.yAxis end
+			if UserInputService:IsKeyDown(Enum.KeyCode.LeftControl) then d -= Vector3.yAxis end
+		end
+	end
+
+	if d.Magnitude < 1e-4 and Char.hum then
+		local md = Char.hum.MoveDirection
+		if md.Magnitude > 0 then
+
+			local flat = flatLook(cf.LookVector)
+			local right = Vector3.new(flat.Z, 0, -flat.X)
+			local fwd = md:Dot(flat)
+			local side = md:Dot(right)
+			d = cf.LookVector * fwd + cf.RightVector * side
+		end
+	end
+
+	if includeVertical and Mobile.vertical ~= 0 then
+		d += Vector3.yAxis * Mobile.vertical
+	end
+
+	if d.Magnitude < 1e-4 then return Vector3.zero end
+	return safeVector(d.Unit)
+end
+
+local function nearestPlayer(maxDist)
+	local best, bestDist = nil, maxDist or math.huge
+	if not Char.root then return nil end
+	for _, p in ipairs(Players:GetPlayers()) do
+		if p ~= LP and p.Character then
+			local r = p.Character:FindFirstChild("HumanoidRootPart")
+			local h = p.Character:FindFirstChildOfClass("Humanoid")
+			if r and h and h.Health > 0 then
+				local d = (r.Position - Char.root.Position).Magnitude
+				if d < bestDist then best, bestDist = p, d end
+			end
+		end
+	end
+	return best
+end
+
+local function playerItems(includeNearest)
+	local list = {}
+	if includeNearest then
+		table.insert(list, { value = "@nearest", text = "Nearest player" })
+	end
+	for _, p in ipairs(Players:GetPlayers()) do
+		if p ~= LP then
+			local label = p.DisplayName ~= p.Name and (p.DisplayName .. " (" .. p.Name .. ")") or p.Name
+			table.insert(list, { value = p.Name, text = label })
+		end
+	end
+	if #list == 0 then
+		table.insert(list, { value = "@none", text = "No other players" })
+	end
+	return list
+end
+
+local function resolveTarget(value)
+	if value == "@nearest" then return nearestPlayer() end
+	if value == "@none" or not value then return nil end
+	return Players:FindFirstChild(value)
+end
+
+local function targetRootOf(plr)
+	if not plr or not plr.Character then return nil end
+	local hum = plr.Character:FindFirstChildOfClass("Humanoid")
+	if hum and hum.Health <= 0 then return nil end
+	return plr.Character:FindFirstChild("HumanoidRootPart")
+end
+
+local playerDropdowns = {}
+local function registerPlayerDropdown(dd, includeNearest)
+	table.insert(playerDropdowns, { dd = dd, nearest = includeNearest })
+end
+
+do
+	local function refreshAll()
+		for _, e in ipairs(playerDropdowns) do
+			pcall(function() e.dd.setItems(playerItems(e.nearest)) end)
+		end
+	end
+	rootMaid:give(Players.PlayerAdded:Connect(function() task.delay(0.5, refreshAll) end))
+	rootMaid:give(Players.PlayerRemoving:Connect(function() task.delay(0.5, refreshAll) end))
+end
+
+Runtime.register({
+	id = "fly",
+	name = "Fly",
+	category = "Movement",
+	mobileVertical = true,
+	desc = "WASD or thumbstick; Space/Ctrl or the on-screen pad for vertical.",
+	conflicts = { "walkspeed", "spinbot", "freecam" },
+	settingOrder = { "speed" },
+	settings = {
+		speed = { type = "slider", label = "Speed", min = 5, max = 500, step = 5, default = 60 },
+	},
+	methods = {
+		{
+			id = "bodyvelocity", name = "BodyVelocity + BodyGyro", tag = "legacy",
+			start = function(ctx)
+				local bv = ctx.maid:give(new("BodyVelocity", {
+					MaxForce = Vector3.one * 1e6,
+					Velocity = Vector3.zero,
+					Parent = Char.root,
+				}))
+				local bg = ctx.maid:give(new("BodyGyro", {
+					MaxTorque = Vector3.one * 4e5,
+					P = 1e4,
+					CFrame = camera().CFrame,
+					Parent = Char.root,
+				}))
+				ctx:every("heartbeat", function()
+					if not alive() or not bv.Parent then return end
+					bv.Velocity = moveDir(true) * ctx.s.speed
+					bg.CFrame = camera().CFrame
+				end)
+			end,
+		},
+		{
+			id = "constraints", name = "LinearVelocity + AlignOrientation", tag = "modern",
+			start = function(ctx)
+				local att = ctx.maid:give(new("Attachment", { Parent = Char.root }))
+				local lv = ctx.maid:give(new("LinearVelocity", {
+					Attachment0 = att,
+					MaxForce = 1e6,
+					RelativeTo = Enum.ActuatorRelativeTo.World,
+					VectorVelocity = Vector3.zero,
+					Parent = Char.root,
+				}))
+				local ao = ctx.maid:give(new("AlignOrientation", {
+					Attachment0 = att,
+					Mode = Enum.OrientationAlignmentMode.OneAttachment,
+					RigidityEnabled = true,
+					Parent = Char.root,
+				}))
+				ctx:every("heartbeat", function()
+					if not alive() or not lv.Parent then return end
+					lv.VectorVelocity = moveDir(true) * ctx.s.speed
+
+					ao.CFrame = CFrame.lookAt(Vector3.zero, flatLook(camera().CFrame.LookVector))
+				end)
+			end,
+		},
+		{
+			id = "velocity", name = "Velocity Write", tag = "no instances",
+			start = function(ctx)
+				ctx:every("heartbeat", function()
+					if not alive() then return end
+					Char.root.AssemblyLinearVelocity = moveDir(true) * ctx.s.speed
+				end)
+			end,
+		},
+		{
+			id = "cframe", name = "CFrame Step", tag = "position",
+			start = function(ctx)
+				ctx:every("render", function(dt)
+					if not alive() then return end
+					local root = Char.root
+					root.AssemblyLinearVelocity = Vector3.zero
+					local d = moveDir(true)
+					if d.Magnitude > 0 then
+						root.CFrame = root.CFrame + d * ctx.s.speed * math.min(dt, 0.1)
+					end
+				end)
+			end,
+		},
+		{
+			id = "lerp", name = "Smooth Lerp", tag = "smooth",
+			start = function(ctx)
+				local goal = Char.root.Position
+				ctx:every("render", function(dt)
+					if not alive() then return end
+					local root = Char.root
+					local d = moveDir(true)
+					goal += d * ctx.s.speed * math.min(dt, 0.1)
+
+					if (goal - root.Position).Magnitude > 60 then goal = root.Position end
+					root.AssemblyLinearVelocity = Vector3.zero
+					root.CFrame = root.CFrame:Lerp(
+						CFrame.new(goal) * (root.CFrame - root.CFrame.Position),
+						math.clamp(dt * 12, 0, 1)
+					)
+				end)
+			end,
+		},
+		{
+			id = "swim", name = "Swim State", tag = "low profile",
+			start = function(ctx)
+				local hum = Char.hum
+				pcall(function() hum:SetStateEnabled(Enum.HumanoidStateType.Swimming, true) end)
+				ctx.maid:give(function()
+					pcall(function()
+						if Char.hum then Char.hum:ChangeState(Enum.HumanoidStateType.GettingUp) end
+					end)
+				end)
+				ctx:every("heartbeat", function()
+					if not alive() then return end
+					Char.hum:ChangeState(Enum.HumanoidStateType.Swimming)
+					Char.root.AssemblyLinearVelocity = moveDir(true) * ctx.s.speed
+				end)
+			end,
+		},
+		{
+			id = "platform", name = "Platform Stand", tag = "state",
+			start = function(ctx)
+				ctx:restore(Char.hum, "PlatformStand")
+				Char.hum.PlatformStand = true
+				ctx:every("heartbeat", function()
+					if not alive() then return end
+					local root = Char.root
+					Char.hum.PlatformStand = true
+					root.AssemblyLinearVelocity = moveDir(true) * ctx.s.speed
+					root.CFrame = safeLookAt(root.Position, camera().CFrame.LookVector)
+				end)
+			end,
+		},
+		{
+			id = "platformpart", name = "Anchored Platform", tag = "grounded",
+			start = function(ctx)
+				local pos = Char.root.Position
+				local plate = ctx.maid:give(new("Part", {
+					Anchored = true,
+					CanCollide = true,
+					CanQuery = false,
+					Size = Vector3.new(7, 1, 7),
+					Transparency = 1,
+					Name = "\0plat",
+					CFrame = CFrame.new(pos - Vector3.new(0, 3.5, 0)),
+					Parent = Workspace,
+				}))
+				ctx:every("heartbeat", function(dt)
+					if not alive() or not plate.Parent then return end
+					local root = Char.root
+					pos += moveDir(true) * ctx.s.speed * math.min(dt, 0.1)
+					if (pos - root.Position).Magnitude > 60 then pos = root.Position end
+					plate.CFrame = CFrame.new(pos - Vector3.new(0, 3.5, 0))
+					root.CFrame = CFrame.new(pos) * (root.CFrame - root.CFrame.Position)
+					root.AssemblyLinearVelocity = Vector3.zero
+
+-- Created by and originally uploaded by https://robloxscripts.com/user/Fleece
+
+				end)
+			end,
+		},
+	},
+})
+
+Runtime.register({
+	id = "walkspeed",
+	name = "Walk Speed",
+	category = "Movement",
+	desc = "Seven ways to move faster, from a plain write to a spoofed read.",
+	conflicts = { "fly" },
+	settingOrder = { "speed" },
+	settings = {
+		speed = { type = "slider", label = "Speed", min = 16, max = 400, step = 2, default = 80 },
+	},
+	methods = {
+		{
+			id = "direct", name = "Direct Write", tag = "simple",
+			start = function(ctx)
+				ctx:restore(Char.hum, "WalkSpeed")
+				Char.hum.WalkSpeed = ctx.s.speed
+				ctx:every("heartbeat", function()
+					if alive() and Char.hum.WalkSpeed ~= ctx.s.speed then
+						Char.hum.WalkSpeed = ctx.s.speed
+					end
+				end)
+			end,
+		},
+		{
+			id = "loop", name = "Loop Set", tag = "beats resets",
+			start = function(ctx)
+				ctx:restore(Char.hum, "WalkSpeed")
+				ctx:every("render", function()
+					if alive() then Char.hum.WalkSpeed = ctx.s.speed end
+				end)
+			end,
+		},
+		{
+			id = "signal", name = "Property Signal", tag = "reactive",
+			start = function(ctx)
+				local hum = Char.hum
+				ctx:restore(hum, "WalkSpeed")
+				hum.WalkSpeed = ctx.s.speed
+				ctx.maid:give(hum:GetPropertyChangedSignal("WalkSpeed"):Connect(function()
+					if hum.Parent and hum.WalkSpeed ~= ctx.s.speed then
+						hum.WalkSpeed = ctx.s.speed
+					end
+				end))
+			end,
+		},
+		{
+			id = "cframe", name = "CFrame Nudge", tag = "property untouched",
+			start = function(ctx)
+				ctx:every("render", function(dt)
+					if not alive() then return end
+					local md = Char.hum.MoveDirection
+					if md.Magnitude > 0 then
+						local extra = math.max(0, ctx.s.speed - Char.hum.WalkSpeed)
+						Char.root.CFrame = Char.root.CFrame + md * extra * math.min(dt, 0.1)
+					end
+				end)
+			end,
+		},
+		{
+			id = "velocity", name = "Velocity Add", tag = "physics",
+			start = function(ctx)
+				ctx:every("heartbeat", function()
+					if not alive() then return end
+					local md = Char.hum.MoveDirection
+					if md.Magnitude > 0 then
+						local root = Char.root
+						local v = root.AssemblyLinearVelocity
+						root.AssemblyLinearVelocity = Vector3.new(md.X * ctx.s.speed, v.Y, md.Z * ctx.s.speed)
+					end
+				end)
+			end,
+		},
+		{
+			id = "impulse", name = "Impulse Pulse", tag = "momentum",
+			start = function(ctx)
+				ctx:every("heartbeat", function(dt)
+					if not alive() then return end
+					local md = Char.hum.MoveDirection
+					if md.Magnitude > 0 then
+						local root = Char.root
+						root:ApplyImpulse(md * root.AssemblyMass * math.max(0, ctx.s.speed - 16) * math.min(dt, 0.1) * 2)
+					end
+				end)
+			end,
+		},
+		{
+			id = "spoof", name = "Spoofed Read (hook)", tag = "hook",
+			needs = { "hookmetamethod", "newcclosure", "checkcaller" },
+			start = function(ctx)
+				local hum = Char.hum
+				ctx:restore(hum, "WalkSpeed")
+				local original
+				original = hookmetamethod(game, "__index", newcclosure(function(self, key)
+					if not checkcaller() and self == hum and key == "WalkSpeed" then
+						return 16
+					end
+					return original(self, key)
+				end))
+				ctx.maid:give(function()
+					pcall(function() hookmetamethod(game, "__index", original) end)
+				end)
+				ctx:every("heartbeat", function()
+					if alive() then Char.hum.WalkSpeed = ctx.s.speed end
+				end)
+			end,
+		},
+	},
+})
+
+Runtime.register({
+	id = "jumppower",
+	name = "Jump Power",
+	category = "Movement",
+	desc = "JumpPower, JumpHeight, or a raw upward velocity kick.",
+	conflicts = { "gravity" },
+	settingOrder = { "power" },
+	settings = {
+		power = { type = "slider", label = "Power", min = 50, max = 500, step = 5, default = 120 },
+	},
+	methods = {
+		{
+			id = "jumppower", name = "JumpPower", tag = "classic",
+			start = function(ctx)
+				ctx:restore(Char.hum, "UseJumpPower")
+				ctx:restore(Char.hum, "JumpPower")
+				Char.hum.UseJumpPower = true
+				ctx:every("heartbeat", function()
+					if not alive() then return end
+					Char.hum.UseJumpPower = true
+					if Char.hum.JumpPower ~= ctx.s.power then Char.hum.JumpPower = ctx.s.power end
+				end)
+			end,
+		},
+		{
+			id = "jumpheight", name = "JumpHeight", tag = "modern",
+			start = function(ctx)
+				ctx:restore(Char.hum, "UseJumpPower")
+				ctx:restore(Char.hum, "JumpHeight")
+				Char.hum.UseJumpPower = false
+				ctx:every("heartbeat", function()
+					if not alive() then return end
+					Char.hum.UseJumpPower = false
+					Char.hum.JumpHeight = ctx.s.power * 0.144
+				end)
+			end,
+		},
+		{
+			id = "velocity", name = "Velocity Kick", tag = "no property",
+			start = function(ctx)
+				ctx.maid:give(UserInputService.JumpRequest:Connect(function()
+					if not alive() or typing() then return end
+					local v = Char.root.AssemblyLinearVelocity
+					Char.root.AssemblyLinearVelocity = Vector3.new(v.X, ctx.s.power * 0.42, v.Z)
+				end))
+			end,
+		},
+		{
+			id = "gravity", name = "Local Gravity Assist", tag = "client",
+			start = function(ctx)
+				ctx:restore(Workspace, "Gravity")
+				ctx:restore(Char.hum, "JumpPower")
+				ctx:every("heartbeat", function()
+					if not alive() then return end
+					Char.hum.UseJumpPower = true
+					Char.hum.JumpPower = 50
+					Workspace.Gravity = math.clamp(196.2 * (60 / math.max(ctx.s.power, 1)), 8, 196.2)
+				end)
+			end,
+		},
+	},
+})
+
+Runtime.register({
+	id = "infjump",
+	name = "Infinite Jump",
+	category = "Movement",
+	desc = "Jump forever. Choose how the jump gets triggered.",
+	methods = {
+		{
+			id = "jumprequest", name = "JumpRequest -> ChangeState", tag = "standard",
+			start = function(ctx)
+				ctx.maid:give(UserInputService.JumpRequest:Connect(function()
+					if alive() and not typing() then
+						Char.hum:ChangeState(Enum.HumanoidStateType.Jumping)
+					end
+				end))
+			end,
+		},
+		{
+			id = "hold", name = "Hold Space (bhop)", tag = "auto",
+			start = function(ctx)
+				ctx:every("render", function()
+					if alive() and not typing() and UserInputService:IsKeyDown(Enum.KeyCode.Space) then
+						Char.hum:ChangeState(Enum.HumanoidStateType.Jumping)
+					end
+				end)
+			end,
+		},
+		{
+			id = "velocity", name = "Velocity Set", tag = "physics",
+			start = function(ctx)
+				ctx.maid:give(UserInputService.JumpRequest:Connect(function()
+					if not alive() or typing() then return end
+					local v = Char.root.AssemblyLinearVelocity
+					Char.root.AssemblyLinearVelocity = Vector3.new(v.X, 50, v.Z)
+				end))
+			end,
+		},
+	},
+})
+
+Runtime.register({
+	id = "noclip",
+	name = "Noclip",
+	category = "Movement",
+	desc = "Walk through geometry. Original collision is restored on toggle-off.",
+	methods = {
+		{
+			id = "loop", name = "CanCollide Loop (all parts)", tag = "thorough",
+			start = function(ctx)
+				ctx:every("stepped", function()
+					if not Char.model then return end
+					for _, p in ipairs(charParts()) do
+						if p.CanCollide then
+							ctx.restorer.setFrom(p, "CanCollide", false, baseCollide(p))
+						end
+					end
+				end)
+			end,
+		},
+		{
+			id = "root", name = "Root + Legs Only", tag = "cheap",
+			start = function(ctx)
+				local names = {
+					"HumanoidRootPart", "Left Leg", "Right Leg", "LeftFoot", "RightFoot",
+					"LeftLowerLeg", "RightLowerLeg", "LeftUpperLeg", "RightUpperLeg",
+					"Torso", "UpperTorso", "LowerTorso",
+				}
+				ctx:every("stepped", function()
+					if not Char.model then return end
+					for _, n in ipairs(names) do
+						local p = Char.model:FindFirstChild(n)
+						if p and p:IsA("BasePart") and p.CanCollide then
+							ctx.restorer.setFrom(p, "CanCollide", false, baseCollide(p))
+						end
+					end
+				end)
+			end,
+		},
+		{
+			id = "massless", name = "Massless + CanCollide", tag = "physics",
+			start = function(ctx)
+				ctx:every("stepped", function()
+					if not Char.model then return end
+					for _, p in ipairs(charParts()) do
+						if p.CanCollide then
+							ctx.restorer.setFrom(p, "CanCollide", false, baseCollide(p))
+						end
+						if not p.Massless then ctx.restorer.set(p, "Massless", true) end
+					end
+				end)
+			end,
+		},
+	},
+})
+
+Runtime.register({
+	id = "spinbot",
+	name = "Spinbot",
+	category = "Movement",
+	desc = "Continuously rotate the character.",
+	conflicts = { "fly", "antifling" },
+	settingOrder = { "rate" },
+	settings = {
+		rate = { type = "slider", label = "Rate", min = 1, max = 60, step = 1, default = 20 },
+	},
+	methods = {
+		{
+			id = "cframe", name = "CFrame Rotate", tag = "client",
+			start = function(ctx)
+				ctx:every("render", function(dt)
+					if not alive() then return end
+					Char.root.CFrame = Char.root.CFrame
+						* CFrame.Angles(0, math.rad(ctx.s.rate * math.min(dt, 0.1) * 60), 0)
+				end)
+			end,
+		},
+		{
+			id = "angular", name = "Angular Velocity", tag = "physics",
+			start = function(ctx)
+				ctx:every("heartbeat", function()
+					if alive() then
+						Char.root.AssemblyAngularVelocity = Vector3.new(0, ctx.s.rate, 0)
+					end
+				end)
+				ctx.maid:give(function()
+					pcall(function()
+						if Char.root then Char.root.AssemblyAngularVelocity = Vector3.zero end
+					end)
+				end)
+			end,
+		},
+	},
+})
+
+Runtime.register({
+	id = "invisible",
+	name = "Invisibility",
+	category = "Character",
+	desc = "Check the method tag, most of these only hide you from yourself.",
+	methods = {
+		{
+			id = "local", name = "Local Transparency", tag = "you only",
+			start = function(ctx)
+				ctx:every("render", function()
+					if not Char.model then return end
+					for _, p in ipairs(charParts()) do
+						p.LocalTransparencyModifier = 1
+					end
+				end)
+				ctx.maid:give(function()
+					for _, p in ipairs(charParts()) do
+						pcall(function() p.LocalTransparencyModifier = 0 end)
+					end
+				end)
+			end,
+		},
+		{
+			id = "transparency", name = "Transparency Write", tag = "replicated",
+			start = function(ctx)
+				for _, p in ipairs(charParts()) do
+					ctx.restorer.set(p, "Transparency", 1)
+				end
+				for _, d in ipairs(Char.model:GetDescendants()) do
+					if d:IsA("Decal") or d:IsA("Texture") then
+						ctx.restorer.set(d, "Transparency", 1)
+					end
+				end
+			end,
+		},
+		{
+			id = "camera", name = "Reparent to Camera", tag = "desync",
+			start = function(ctx)
+				local model = Char.model
+				local origin = model.Parent
+				model.Parent = camera()
+				ctx.maid:give(function()
+					pcall(function()
+						if model and model.Parent == camera() then model.Parent = origin end
+					end)
+				end)
+			end,
+		},
+		{
+			id = "clone", name = "Clone Decoy", tag = "desync",
+			start = function(ctx)
+				local decoy = Char.model:Clone()
+				for _, d in ipairs(decoy:GetDescendants()) do
+					if d:IsA("Script") or d:IsA("LocalScript") then d:Destroy() end
+				end
+				decoy.Name = rname()
+				decoy.Parent = Workspace
+				ctx.maid:give(decoy)
+				ctx:every("render", function()
+					if not Char.model then return end
+					for _, p in ipairs(charParts()) do p.LocalTransparencyModifier = 1 end
+				end)
+				ctx.maid:give(function()
+					for _, p in ipairs(charParts()) do
+						pcall(function() p.LocalTransparencyModifier = 0 end)
+					end
+				end)
+			end,
+		},
+	},
+})
+
+Runtime.register({
+	id = "antifling",
+	name = "Anti-Fling",
+	category = "Character",
+	desc = "Clamp abnormal velocity spikes before they launch you.",
+	conflicts = { "fling", "spinbot" },
+	settingOrder = { "limit" },
+	settings = {
+		limit = { type = "slider", label = "Max vel", min = 50, max = 800, step = 10, default = 220 },
+	},
+	methods = {
+		{
+			id = "clamp", name = "Velocity Clamp", tag = "soft",
+			start = function(ctx)
+				ctx:every("heartbeat", function()
+					if not alive() then return end
+					local root = Char.root
+					local v = root.AssemblyLinearVelocity
+					if v.Magnitude > ctx.s.limit and isFinite(v.Magnitude) then
+						root.AssemblyLinearVelocity = v.Unit * ctx.s.limit
+					end
+					if root.AssemblyAngularVelocity.Magnitude > 30 then
+						root.AssemblyAngularVelocity = Vector3.zero
+					end
+				end)
+			end,
+		},
+		{
+			id = "spinlock", name = "Angular Lock Only", tag = "targeted",
+			start = function(ctx)
+				ctx:every("stepped", function()
+					if alive() then Char.root.AssemblyAngularVelocity = Vector3.zero end
+				end)
+			end,
+		},
+		{
+			id = "massive", name = "Heavy Root", tag = "resistive",
+			start = function(ctx)
+				ctx:set(Char.root, "CustomPhysicalProperties",
+					PhysicalProperties.new(100, 0.3, 0.5, 1, 1))
+				ctx:every("heartbeat", function()
+					if not alive() then return end
+					if Char.root.AssemblyAngularVelocity.Magnitude > 25 then
+						Char.root.AssemblyAngularVelocity = Vector3.zero
+					end
+				end)
+			end,
+		},
+	},
+})
+
+Runtime.register({
+	id = "antivoid",
+	name = "Anti-Void",
+	category = "Character",
+	desc = "Catch yourself before falling out of the world.",
+	settingOrder = { "floor" },
+	settings = {
+		floor = { type = "slider", label = "Y floor", min = -500, max = 0, step = 10, default = -120 },
+	},
+	methods = {
+		{
+			id = "teleport", name = "Snap Back", tag = "restores position",
+			start = function(ctx)
+				local lastSafe = Char.root.CFrame
+				ctx:every("heartbeat", function()
+					if not alive() then return end
+					local root = Char.root
+					if root.Position.Y < ctx.s.floor then
+						root.CFrame = lastSafe
+						root.AssemblyLinearVelocity = Vector3.zero
+
+						notifyThrottled("antivoid", 3, "Anti-void caught you.", "warn")
+					elseif root.Position.Y > ctx.s.floor + 25 then
+						lastSafe = root.CFrame
+					end
+				end)
+			end,
+		},
+		{
+			id = "freeze", name = "Freeze In Place", tag = "hover",
+			start = function(ctx)
+				ctx:every("heartbeat", function()
+					if not alive() then return end
+					local root = Char.root
+					if root.Position.Y < ctx.s.floor then
+						root.AssemblyLinearVelocity = Vector3.zero
+						root.CFrame = CFrame.new(root.Position.X, ctx.s.floor, root.Position.Z)
+					end
+				end)
+			end,
+		},
+	},
+})
+
+Runtime.register({
+	id = "antiafk",
+	name = "Anti-AFK",
+	category = "Character",
+	desc = "Stop the 20-minute idle kick.",
+	methods = {
+		{
+			id = "virtualuser", name = "VirtualUser Click", tag = "standard",
+			requiresChar = false,
+			start = function(ctx)
+				ctx.maid:give(LP.Idled:Connect(function()
+					pcall(function()
+						VirtualUser:CaptureController()
+						VirtualUser:ClickButton2(Vector2.new())
+					end)
+				end))
+			end,
+		},
+		{
+			id = "disconnect", name = "Disable Idled Listeners", tag = "hook",
+
+-- Created by and originally uploaded by https://robloxscripts.com/user/Fleece
+
+			needs = { "getconnections" },
+			requiresChar = false,
+			start = function(ctx)
+				local saved = {}
+				for _, c in ipairs(getconnections(LP.Idled)) do
+					table.insert(saved, c)
+					pcall(function() c:Disable() end)
+				end
+				ctx.maid:give(function()
+					for _, c in ipairs(saved) do pcall(function() c:Enable() end) end
+				end)
+			end,
+		},
+		{
+			id = "both", name = "Both", tag = "belt and braces",
+			needs = { "getconnections" },
+			requiresChar = false,
+			start = function(ctx)
+				local saved = {}
+				for _, c in ipairs(getconnections(LP.Idled)) do
+					table.insert(saved, c)
+					pcall(function() c:Disable() end)
+				end
+				ctx.maid:give(function()
+					for _, c in ipairs(saved) do pcall(function() c:Enable() end) end
+				end)
+				ctx.maid:give(LP.Idled:Connect(function()
+					pcall(function()
+						VirtualUser:CaptureController()
+						VirtualUser:ClickButton2(Vector2.new())
+					end)
+				end))
+			end,
+		},
+	},
+})
+
+local AIM_PART_SETS = {
+	head  = { "Head" },
+	torso = { "UpperTorso", "Torso" },
+	root  = { "HumanoidRootPart" },
+}
+
+local function aimPartOf(char, key)
+	if key == "closest" then
+		local best, bestD
+		local cursor = UserInputService:GetMouseLocation()
+		local cam = camera()
+		for _, list in pairs(AIM_PART_SETS) do
+			for _, n in ipairs(list) do
+				local part = char:FindFirstChild(n)
+				if part and part:IsA("BasePart") then
+					local sp = cam:WorldToViewportPoint(part.Position)
+					if sp.Z > 0 then
+						local d = (Vector2.new(sp.X, sp.Y) - cursor).Magnitude
+						if not bestD or d < bestD then best, bestD = part, d end
+					end
+				end
+			end
+		end
+		return best or char:FindFirstChild("HumanoidRootPart")
+	end
+	for _, n in ipairs(AIM_PART_SETS[key] or AIM_PART_SETS.head) do
+		local part = char:FindFirstChild(n)
+		if part and part:IsA("BasePart") then return part end
+	end
+	return char:FindFirstChild("HumanoidRootPart")
+end
+
+local function hasLineOfSight(part)
+	local cam = camera()
+	if not cam then return false end
+	local origin = cam.CFrame.Position
+	local params = RaycastParams.new()
+	params.FilterType = Enum.RaycastFilterType.Exclude
+	params.FilterDescendantsInstances = { Char.model, part.Parent }
+	params.IgnoreWater = true
+	local hit = Workspace:Raycast(origin, part.Position - origin, params)
+	return hit == nil
+end
+
+local function aimHoldActive(ctx)
+	if not ctx.s.holdaim then return true end
+	if UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton2) then return true end
+	return UserInputService.TouchEnabled and Mobile and Mobile.vertical ~= 0
+end
+
+local function findAimTarget(ctx)
+	local cam = camera()
+	if not cam or not alive() then return nil end
+	local cursor = UserInputService:GetMouseLocation()
+	local best, bestD
+
+	for _, p in ipairs(Players:GetPlayers()) do
+		if p ~= LP and p.Character then
+			local skip = ctx.s.teamcheck and p.Team == LP.Team
+			local hum = p.Character:FindFirstChildOfClass("Humanoid")
+			if not skip and hum and hum.Health > 0 then
+				local part = aimPartOf(p.Character, ctx.s.part)
+				if part then
+					local sp = cam:WorldToViewportPoint(part.Position)
+					if sp.Z > 0 then
+						local d = (Vector2.new(sp.X, sp.Y) - cursor).Magnitude
+						if d <= ctx.s.fov and (not bestD or d < bestD) then
+							if not ctx.s.wallcheck or hasLineOfSight(part) then
+								best, bestD = part, d
+							end
+						end
+					end
+				end
+			end
+		end
+	end
+	return best
+end
+
+local function attachFovCircle(ctx)
+	local ring = ctx.maid:give(new("Frame", {
+		BackgroundTransparency = 1,
+		AnchorPoint = Vector2.new(0.5, 0.5),
+		Size = offset(ctx.s.fov * 2, ctx.s.fov * 2),
+		Visible = false,
+		ZIndex = 450,
+		Parent = screen,
+	}))
+	new("UICorner", { CornerRadius = UDim.new(1, 0), Parent = ring })
+	local ringStroke = new("UIStroke", {
+		Color = T.white,
+		Thickness = 1,
+		Transparency = 0.45,
+		Parent = ring,
+	})
+
+	ctx:every("render", function()
+		if not ctx.s.showfov then
+			ring.Visible = false
+			return
+		end
+		local m = UserInputService:GetMouseLocation()
+		ring.Visible = true
+		ring.Size = offset(ctx.s.fov * 2, ctx.s.fov * 2)
+		ring.Position = offset(m.X, m.Y)
+		ringStroke.Color = ctx.locked and T.red or T.white
+	end)
+end
+
+local function aimSettings()
+	return {
+		part = {
+			type = "dropdown", label = "Aim at", default = "head",
+			items = {
+				{ value = "head",    text = "Head",             note = "highest reward" },
+				{ value = "torso",   text = "Torso",            note = "most reliable" },
+				{ value = "root",    text = "HumanoidRootPart", note = "hitbox centre" },
+				{ value = "closest", text = "Closest to cursor", note = "adaptive" },
+			},
+		},
+		smoothness = { type = "slider", label = "Smoothing", min = 1, max = 40, step = 1, default = 10 },
+		fov        = { type = "slider", label = "FOV size", min = 20, max = 900, step = 10, default = 160 },
+		showfov    = { type = "toggle", label = "Show FOV", default = true },
+		teamcheck  = { type = "toggle", label = "Team check", default = false },
+		wallcheck  = { type = "toggle", label = "Visible only", default = true },
+		holdaim    = { type = "toggle", label = "Hold RMB", default = true },
+	}
+end
+
+Runtime.register({
+	id = "aimbot",
+	name = "Aimbot",
+	category = "Combat",
+	desc = "Targets the closest player to your cursor inside the FOV ring.",
+	settingOrder = { "part", "smoothness", "fov", "showfov", "teamcheck", "wallcheck", "holdaim" },
+	settings = aimSettings(),
+	methods = {
+		{
+			id = "camerasmooth", name = "Camera Lock (smooth)", tag = "most games",
+			start = function(ctx)
+				attachFovCircle(ctx)
+				ctx:every("render", function()
+					ctx.locked = false
+					if not alive() or not aimHoldActive(ctx) then return end
+					local target = findAimTarget(ctx)
+					if not target then return end
+					ctx.locked = true
+					local cam = camera()
+					local goal = CFrame.lookAt(cam.CFrame.Position, target.Position)
+					cam.CFrame = cam.CFrame:Lerp(goal, 1 / math.max(ctx.s.smoothness, 1))
+				end)
+			end,
+		},
+		{
+			id = "camerasnap", name = "Camera Snap", tag = "instant",
+			start = function(ctx)
+				attachFovCircle(ctx)
+				ctx:every("render", function()
+					ctx.locked = false
+					if not alive() or not aimHoldActive(ctx) then return end
+					local target = findAimTarget(ctx)
+					if not target then return end
+					ctx.locked = true
+					local cam = camera()
+					cam.CFrame = CFrame.lookAt(cam.CFrame.Position, target.Position)
+				end)
+			end,
+		},
+		{
+			id = "mousemove", name = "Mouse Move", tag = "moves cursor",
+			needs = { "mousemoverel" },
+			start = function(ctx)
+				attachFovCircle(ctx)
+				ctx:every("render", function()
+					ctx.locked = false
+					if not alive() or not aimHoldActive(ctx) then return end
+					local target = findAimTarget(ctx)
+					if not target then return end
+					local cam = camera()
+					local sp = cam:WorldToViewportPoint(target.Position)
+					if sp.Z <= 0 then return end
+					ctx.locked = true
+					local cursor = UserInputService:GetMouseLocation()
+					local delta = Vector2.new(sp.X, sp.Y) - cursor
+					local step = math.max(ctx.s.smoothness, 1)
+					pcall(function() mousemoverel(delta.X / step, delta.Y / step) end)
+				end)
+			end,
+		},
+		{
+			id = "silent", name = "Silent Aim (Mouse.Hit hook)", tag = "hook",
+			needs = { "hookmetamethod", "newcclosure", "checkcaller" },
+			start = function(ctx)
+				attachFovCircle(ctx)
+				local mouse = LP:GetMouse()
+				local current = nil
+
+				local original
+				original = hookmetamethod(game, "__index", newcclosure(function(self, key)
+					if not checkcaller() and self == mouse and current and current.Parent then
+						if key == "Hit" then return CFrame.new(current.Position) end
+						if key == "Target" then return current end
+					end
+					return original(self, key)
+				end))
+				ctx.maid:give(function()
+					pcall(function() hookmetamethod(game, "__index", original) end)
+				end)
+
+				ctx:every("render", function()
+					if not alive() or not aimHoldActive(ctx) then
+						current, ctx.locked = nil, false
+						return
+					end
+					current = findAimTarget(ctx)
+					ctx.locked = current ~= nil
+				end)
+			end,
+		},
+	},
+})
+
+Runtime.register({
+	id = "hitbox",
+	name = "Hitbox Expander",
+	category = "Combat",
+	desc = "Grow other players' hit regions. Client-side only.",
+	settingOrder = { "size", "transparency" },
+	settings = {
+		size = { type = "slider", label = "Size", min = 4, max = 60, step = 1, default = 15 },
+		transparency = { type = "slider", label = "Alpha", min = 0, max = 1, step = 0.05, default = 0.75 },
+	},
+	methods = (function()
+
+		local function expander(id, name, tag, pick)
+			return {
+				id = id, name = name, tag = tag, requiresChar = false,
+				start = function(ctx)
+
+					ctx:throttled("heartbeat", 0.125, function()
+						for _, p in ipairs(Players:GetPlayers()) do
+							if p ~= LP and p.Character then
+								for _, part in ipairs(pick(p.Character)) do
+									local size = Vector3.one * ctx.s.size
+									if part.Size ~= size then ctx.restorer.set(part, "Size", size) end
+									ctx.restorer.set(part, "Transparency", ctx.s.transparency)
+									ctx.restorer.set(part, "CanCollide", false)
+									ctx.restorer.set(part, "Massless", true)
+								end
+							end
+						end
+					end)
+				end,
+			}
+		end
+
+		local function one(char, childName)
+			local p = char:FindFirstChild(childName)
+			return (p and p:IsA("BasePart")) and { p } or {}
+		end
+
+		return {
+			expander("root", "HumanoidRootPart", "most games", function(c) return one(c, "HumanoidRootPart") end),
+			expander("head", "Head", "headshot games", function(c) return one(c, "Head") end),
+			expander("all", "Whole Character", "aggressive", function(c)
+				local out = {}
+				for _, part in ipairs(c:GetChildren()) do
+					if part:IsA("BasePart") then table.insert(out, part) end
+				end
+				return out
+			end),
+		}
+	end)(),
+})
+
+Runtime.register({
+	id = "fling",
+	name = "Fling",
+	category = "Combat",
+	desc = "Needs contact or network ownership, it is not a ranged attack.",
+	conflicts = { "antifling" },
+	settingOrder = { "target", "power", "autoreturn" },
+	settings = {
+		target = { type = "dropdown", label = "Target", items = playerItems(true), default = "@nearest" },
+		power = { type = "slider", label = "Power", min = 1000, max = 100000, step = 1000, default = 30000 },
+		autoreturn = { type = "toggle", label = "Auto return", default = true },
+	},
+	methods = {
+		{
+			id = "spin", name = "Spin Fling", tag = "classic",
+			start = function(ctx)
+				local home = Char.root.CFrame
+				ctx.maid:give(function()
+					pcall(function()
+						if Char.root then
+							Char.root.AssemblyAngularVelocity = Vector3.zero
+							Char.root.AssemblyLinearVelocity = Vector3.zero
+							if ctx.s.autoreturn then Char.root.CFrame = home end
+						end
+					end)
+				end)
+				ctx:every("heartbeat", function()
+					if not alive() then return end
+					local tr = targetRootOf(resolveTarget(ctx.s.target))
+					if not tr then return end
+					local root = Char.root
+					root.AssemblyAngularVelocity = Vector3.new(0, ctx.s.power, 0)
+					root.CFrame = tr.CFrame * CFrame.new(0, 0, -1.5)
+					root.AssemblyLinearVelocity = Vector3.new(0, ctx.s.power * 0.001, 0)
+				end)
+			end,
+		},
+		{
+			id = "constraint", name = "AngularVelocity Constraint", tag = "modern",
+			start = function(ctx)
+				local home = Char.root.CFrame
+				local att = ctx.maid:give(new("Attachment", { Parent = Char.root }))
+				local av = ctx.maid:give(new("AngularVelocity", {
+					Attachment0 = att,
+					MaxTorque = math.huge,
+					AngularVelocity = Vector3.zero,
+					RelativeTo = Enum.ActuatorRelativeTo.World,
+					Parent = Char.root,
+				}))
+				ctx.maid:give(function()
+					pcall(function()
+						if Char.root and ctx.s.autoreturn then Char.root.CFrame = home end
+					end)
+				end)
+				ctx:every("heartbeat", function()
+					if not alive() or not av.Parent then return end
+					local tr = targetRootOf(resolveTarget(ctx.s.target))
+					if not tr then
+						av.AngularVelocity = Vector3.zero
+						return
+					end
+					av.AngularVelocity = Vector3.new(0, ctx.s.power, 0)
+					Char.root.CFrame = tr.CFrame * CFrame.new(0, 0, -1.5)
+				end)
+			end,
+		},
+		{
+			id = "touch", name = "Touch Interest", tag = "hook",
+			needs = { "firetouchinterest" },
+			start = function(ctx)
+				local home = Char.root.CFrame
+				ctx.maid:give(function()
+					pcall(function()
+						if Char.root then
+							Char.root.AssemblyAngularVelocity = Vector3.zero
+							if ctx.s.autoreturn then Char.root.CFrame = home end
+						end
+					end)
+				end)
+				ctx:every("heartbeat", function()
+					if not alive() then return end
+					local tr = targetRootOf(resolveTarget(ctx.s.target))
+					if not tr then return end
+					local root = Char.root
+					root.AssemblyAngularVelocity = Vector3.new(0, ctx.s.power, 0)
+					pcall(function()
+						firetouchinterest(root, tr, 0)
+						firetouchinterest(root, tr, 1)
+					end)
+				end)
+			end,
+		},
+		{
+			id = "void", name = "Void Drop", tag = "ownership",
+			start = function(ctx)
+				local home = Char.root.CFrame
+				ctx.maid:give(function()
+					pcall(function()
+						if Char.root then
+							Char.root.AssemblyLinearVelocity = Vector3.zero
+							if ctx.s.autoreturn then Char.root.CFrame = home end
+						end
+					end)
+				end)
+				ctx:every("heartbeat", function()
+					if not alive() then return end
+					local tr = targetRootOf(resolveTarget(ctx.s.target))
+					if not tr then return end
+					Char.root.CFrame = tr.CFrame
+					Char.root.AssemblyLinearVelocity = Vector3.new(0, -ctx.s.power * 0.02, 0)
+				end)
+			end,
+		},
+	},
+})
+
+Runtime.register({
+	id = "fov",
+	name = "Field of View",
+	category = "Visuals",
+	desc = "Four ways to widen the camera, including past the 120 cap.",
+	settingOrder = { "fov" },
+	settings = {
+		fov = { type = "slider", label = "FOV", min = 20, max = 120, step = 1, default = 100 },
+	},
+	methods = {
+		{
+			id = "direct", name = "Direct Write", tag = "simple",
+			requiresChar = false,
+			start = function(ctx)
+				ctx:restore(camera(), "FieldOfView")
+				ctx:every("heartbeat", function()
+					local cam = camera()
+					if cam and cam.FieldOfView ~= ctx.s.fov then cam.FieldOfView = ctx.s.fov end
+				end)
+			end,
+		},
+		{
+			id = "lock", name = "Render Loop Lock", tag = "beats resets",
+			requiresChar = false,
+			start = function(ctx)
+				ctx:restore(camera(), "FieldOfView")
+				ctx:every("render", function()
+					local cam = camera()
+					if cam then cam.FieldOfView = ctx.s.fov end
+				end)
+			end,
+		},
+		{
+			id = "signal", name = "Property Signal", tag = "reactive",
+			requiresChar = false,
+			start = function(ctx)
+				local cam = camera()
+				ctx:restore(cam, "FieldOfView")
+				cam.FieldOfView = ctx.s.fov
+				ctx.maid:give(cam:GetPropertyChangedSignal("FieldOfView"):Connect(function()
+					if cam.Parent and cam.FieldOfView ~= ctx.s.fov then cam.FieldOfView = ctx.s.fov end
+				end))
+			end,
+		},
+		{
+			id = "maxaxis", name = "MaxAxis Mode", tag = "past 120",
+			requiresChar = false,
+			start = function(ctx)
+				local cam = camera()
+				ctx:restore(cam, "FieldOfView")
+				ctx:restore(cam, "FieldOfViewMode")
+				cam.FieldOfViewMode = Enum.FieldOfViewMode.MaxAxis
+				ctx:every("render", function()
+					local c = camera()
+					if c then c.FieldOfView = ctx.s.fov end
+				end)
+			end,
+		},
+	},
+})
+
+Runtime.register({
+	id = "fullbright",
+	name = "Fullbright",
+	category = "Visuals",
+	desc = "Flatten lighting so nothing sits in shadow.",
+	conflicts = { "optimizer" },
+	settingOrder = { "brightness" },
+	settings = {
+		brightness = { type = "slider", label = "Level", min = 0.5, max = 5, step = 0.1, default = 2 },
+	},
+
+-- Created by and originally uploaded by https://robloxscripts.com/user/Fleece
+
+	methods = {
+		{
+			id = "ambient", name = "Ambient Flood", tag = "lighting",
+			requiresChar = false,
+			start = function(ctx)
+				for _, prop in ipairs({ "Ambient", "OutdoorAmbient", "Brightness",
+					"ClockTime", "FogEnd", "GlobalShadows" }) do
+					ctx:restore(Lighting, prop)
+				end
+				ctx:throttled("heartbeat", 0.25, function()
+					Lighting.Ambient = Color3.new(1, 1, 1)
+					Lighting.OutdoorAmbient = Color3.new(1, 1, 1)
+					Lighting.Brightness = ctx.s.brightness
+					Lighting.ClockTime = 14
+					Lighting.FogEnd = 1e6
+					Lighting.GlobalShadows = false
+				end)
+			end,
+		},
+		{
+			id = "colorcorrection", name = "ColorCorrection", tag = "post effect",
+			requiresChar = false,
+			start = function(ctx)
+				ctx.maid:give(new("ColorCorrectionEffect", {
+					Name = "\0fb",
+					Brightness = ctx.s.brightness * 0.12,
+					Contrast = -0.1,
+					Saturation = 0.1,
+					Parent = Lighting,
+				}))
+			end,
+		},
+		{
+			id = "atmosphere", name = "Strip Atmosphere & Fog", tag = "removal",
+			requiresChar = false,
+			start = function(ctx)
+				for _, d in ipairs(Lighting:GetChildren()) do
+					if d:IsA("Atmosphere") or d:IsA("BlurEffect") or d:IsA("SunRaysEffect") then
+						ctx.restorer.set(d, "Parent", nil)
+					end
+				end
+				ctx:restore(Lighting, "FogEnd")
+				ctx:restore(Lighting, "FogStart")
+				Lighting.FogEnd = 1e6
+				Lighting.FogStart = 1e6
+			end,
+		},
+		{
+			id = "combined", name = "Everything", tag = "max",
+			requiresChar = false,
+			start = function(ctx)
+				for _, prop in ipairs({ "Ambient", "OutdoorAmbient", "Brightness",
+					"ClockTime", "FogEnd", "FogStart", "GlobalShadows" }) do
+					ctx:restore(Lighting, prop)
+				end
+				for _, d in ipairs(Lighting:GetChildren()) do
+					if d:IsA("Atmosphere") or d:IsA("BlurEffect") or d:IsA("SunRaysEffect") then
+						ctx.restorer.set(d, "Parent", nil)
+					end
+				end
+				ctx.maid:give(new("ColorCorrectionEffect", {
+					Name = "\0fb", Brightness = 0.15, Contrast = -0.05, Parent = Lighting,
+				}))
+				ctx:throttled("heartbeat", 0.25, function()
+					Lighting.Ambient = Color3.new(1, 1, 1)
+					Lighting.OutdoorAmbient = Color3.new(1, 1, 1)
+					Lighting.Brightness = ctx.s.brightness
+					Lighting.ClockTime = 14
+					Lighting.FogEnd = 1e6
+					Lighting.GlobalShadows = false
+				end)
+			end,
+		},
+	},
+})
+
+Runtime.register({
+	id = "esp",
+	name = "Player ESP",
+	category = "Visuals",
+	desc = "The method picks the render backend.",
+	settingOrder = { "teamcheck", "names", "maxdist" },
+	settings = {
+		teamcheck = { type = "toggle", label = "Team check", default = false, restart = true },
+		names = { type = "toggle", label = "Names", default = true, restart = true },
+		maxdist = { type = "slider", label = "Max dist", min = 100, max = 5000, step = 100, default = 2000 },
+	},
+	methods = (function()
+		local function teamOk(ctx, p)
+			if not ctx.s.teamcheck then return true end
+			return p.Team ~= LP.Team
+		end
+
+		local function nameTag(ctx, m, p, char)
+			if not ctx.s.names then return end
+			local head = char:FindFirstChild("Head")
+			if not head then return end
+
+			local bb = m:give(new("BillboardGui", {
+				Adornee = head,
+				Size = UDim2.fromOffset(220, 34),
+				StudsOffset = Vector3.new(0, 2.6, 0),
+				AlwaysOnTop = true,
+				MaxDistance = 5000,
+				Parent = guiRoot,
+			}))
+			local lbl = new("TextLabel", {
+				BackgroundTransparency = 1,
+				Size = UDim2.fromScale(1, 1),
+				Font = FONT_BOLD,
+				Text = p.DisplayName,
+				TextSize = 13,
+				TextColor3 = T.white,
+				TextStrokeTransparency = 0.35,
+				Parent = bb,
+			})
+
+			m:give(task.spawn(function()
+				while true do
+					task.wait(0.25)
+					if not bb.Parent or not char.Parent then break end
+					local r = char:FindFirstChild("HumanoidRootPart")
+					local h = char:FindFirstChildOfClass("Humanoid")
+					if r and Char.root then
+						local d = math.floor((r.Position - Char.root.Position).Magnitude)
+						bb.Enabled = d <= ctx.s.maxdist and teamOk(ctx, p)
+						lbl.Text = ("%s  -  %dm%s"):format(p.DisplayName, d,
+							h and ("  -  " .. math.floor(math.max(h.Health, 0))) or "")
+					end
+				end
+			end))
+		end
+
+		local function backend(id, name, tag, build)
+			return {
+				id = id, name = name, tag = tag, requiresChar = false,
+				start = function(ctx)
+
+					local tracked = {}
+
+					local function drop(p)
+						local e = tracked[p]
+						if e then
+							tracked[p] = nil
+							e.body:clean()
+							e.life:clean()
+						end
+					end
+
+					local function attach(p)
+						drop(p)
+						local entry = { life = Maid.new(), body = Maid.new() }
+						tracked[p] = entry
+
+						local function onChar(char)
+							entry.body:clean()
+							task.wait(0.25)
+							if not char.Parent or not tracked[p] then return end
+							local ok, err = pcall(build, ctx, entry.body, p, char)
+							if not ok then
+								local _ = err
+							end
+						end
+
+						entry.life:give(p.CharacterAdded:Connect(function(c)
+							task.spawn(onChar, c)
+						end))
+						if p.Character then task.spawn(onChar, p.Character) end
+					end
+
+					for _, p in ipairs(Players:GetPlayers()) do
+						if p ~= LP then attach(p) end
+					end
+					ctx.maid:give(Players.PlayerAdded:Connect(function(p)
+						if p ~= LP then attach(p) end
+					end))
+					ctx.maid:give(Players.PlayerRemoving:Connect(drop))
+					ctx.maid:give(function()
+						for p in pairs(tracked) do drop(p) end
+					end)
+				end,
+			}
+		end
+
+		return {
+			backend("highlight", "Highlight", "chams", function(ctx, m, p, char)
+				local hl = m:give(new("Highlight", {
+					Adornee = char,
+					FillColor = T.red,
+					OutlineColor = T.white,
+					FillTransparency = 0.6,
+					OutlineTransparency = 0,
+					DepthMode = Enum.HighlightDepthMode.AlwaysOnTop,
+					Enabled = teamOk(ctx, p),
+					Parent = guiRoot,
+				}))
+				nameTag(ctx, m, p, char)
+				m:give(task.spawn(function()
+					while true do
+						task.wait(0.5)
+						if not hl.Parent then break end
+						hl.Enabled = teamOk(ctx, p)
+					end
+				end))
+			end),
+
+			backend("billboard", "Billboard Only", "text", function(ctx, m, p, char)
+				nameTag(ctx, m, p, char)
+			end),
+
+			backend("selection", "SelectionBox", "wireframe", function(ctx, m, p, char)
+				if not teamOk(ctx, p) then return end
+				for _, part in ipairs(char:GetChildren()) do
+					if part:IsA("BasePart") then
+						m:give(new("SelectionBox", {
+							Adornee = part,
+							LineThickness = 0.03,
+							Color3 = T.green,
+							SurfaceTransparency = 1,
+							Parent = guiRoot,
+						}))
+					end
+				end
+				nameTag(ctx, m, p, char)
+			end),
+
+			backend("adornment", "Box Adornment", "single box", function(ctx, m, p, char)
+				local r = char:FindFirstChild("HumanoidRootPart")
+				if not r or not teamOk(ctx, p) then return end
+				m:give(new("BoxHandleAdornment", {
+					Adornee = r,
+					Size = Vector3.new(4, 6, 2),
+					Color3 = T.yellow,
+					Transparency = 0.55,
+					AlwaysOnTop = true,
+					ZIndex = 0,
+					Parent = guiRoot,
+				}))
+				nameTag(ctx, m, p, char)
+			end),
+		}
+	end)(),
+})
+
+Runtime.register({
+	id = "xray",
+	name = "X-Ray",
+	category = "Visuals",
+	desc = "See through world geometry.",
+	settingOrder = { "alpha" },
+	settings = {
+		alpha = { type = "slider", label = "Alpha", min = 0.1, max = 1, step = 0.05, default = 0.65 },
+	},
+	methods = {
+		{
+			id = "localmod", name = "LocalTransparencyModifier", tag = "reversible",
+			requiresChar = false,
+			start = function(ctx)
+				local touched = setmetatable({}, { __mode = "k" })
+				local function sweep()
+					for _, d in ipairs(Workspace:GetDescendants()) do
+						if d:IsA("BasePart") and d.Transparency < 1
+							and not Players:GetPlayerFromCharacter(d.Parent)
+							and not (Char.model and d:IsDescendantOf(Char.model)) then
+							touched[d] = true
+							d.LocalTransparencyModifier = ctx.s.alpha
+						end
+					end
+				end
+				sweep()
+
+				ctx:throttled("heartbeat", 1, sweep)
+				ctx.maid:give(function()
+					for d in pairs(touched) do
+						pcall(function() d.LocalTransparencyModifier = 0 end)
+					end
+				end)
+			end,
+		},
+		{
+			id = "transparency", name = "Transparency Write", tag = "one-shot",
+			requiresChar = false,
+			start = function(ctx)
+				for _, d in ipairs(Workspace:GetDescendants()) do
+					if d:IsA("BasePart") and d.Transparency < 1
+						and not Players:GetPlayerFromCharacter(d.Parent)
+						and not (Char.model and d:IsDescendantOf(Char.model)) then
+						ctx.restorer.set(d, "Transparency", ctx.s.alpha)
+					end
+				end
+			end,
+		},
+	},
+})
+
+Runtime.register({
+	id = "freecam",
+	name = "Freecam",
+	category = "Visuals",
+	mobileVertical = true,
+	desc = "Detach the camera. Right-drag (or touch-drag) to look around.",
+	conflicts = { "fly" },
+	settingOrder = { "speed" },
+	settings = {
+		speed = { type = "slider", label = "Speed", min = 10, max = 400, step = 5, default = 80 },
+	},
+	methods = {
+		{
+			id = "scriptable", name = "Scriptable Camera", tag = "full control",
+			requiresChar = false,
+			start = function(ctx)
+				local cam = camera()
+				ctx:restore(cam, "CameraType")
+				ctx:restore(cam, "CameraSubject")
+
+				local cf = cam.CFrame
+				local pitch, yaw = 0, 0
+				local x, y = cf:ToOrientation()
+				pitch, yaw = x, y
+
+				cam.CameraType = Enum.CameraType.Scriptable
+
+				ctx.maid:give(UserInputService.InputChanged:Connect(function(input)
+					local delta
+					if input.UserInputType == Enum.UserInputType.MouseMovement
+						and UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton2) then
+						delta = input.Delta
+					elseif input.UserInputType == Enum.UserInputType.Touch then
+
+						if not (activeDrag or (closeActivePopup ~= nil)) then
+							delta = input.Delta
+						end
+					end
+					if delta then
+						yaw -= delta.X * 0.005
+						pitch = math.clamp(pitch - delta.Y * 0.005, -1.4, 1.4)
+					end
+				end))
+
+				ctx:every("render", function(dt)
+					local c = camera()
+					if not c then return end
+					local rot = CFrame.fromOrientation(pitch, yaw, 0)
+					local d = Vector3.zero
+					if not typing() then
+						if UserInputService:IsKeyDown(Enum.KeyCode.W) then d += rot.LookVector end
+						if UserInputService:IsKeyDown(Enum.KeyCode.S) then d -= rot.LookVector end
+						if UserInputService:IsKeyDown(Enum.KeyCode.A) then d -= rot.RightVector end
+						if UserInputService:IsKeyDown(Enum.KeyCode.D) then d += rot.RightVector end
+						if UserInputService:IsKeyDown(Enum.KeyCode.Space) then d += Vector3.yAxis end
+						if UserInputService:IsKeyDown(Enum.KeyCode.LeftControl) then d -= Vector3.yAxis end
+					end
+					local pos = cf.Position
+					if d.Magnitude > 1e-4 then
+						pos += d.Unit * ctx.s.speed * math.min(dt, 0.1)
+					end
+					cf = CFrame.new(pos)
+					c.CFrame = cf * rot
+				end)
+			end,
+		},
+		{
+			id = "subject", name = "Detached Subject", tag = "keeps controls",
+			requiresChar = false,
+			start = function(ctx)
+				local cam = camera()
+				ctx:restore(cam, "CameraSubject")
+				local anchor = ctx.maid:give(new("Part", {
+					Anchored = true, CanCollide = false, CanQuery = false,
+					Transparency = 1, Size = Vector3.one, Name = "\0fc",
+					CFrame = cam.CFrame, Parent = Workspace,
+				}))
+				cam.CameraSubject = anchor
+				ctx:every("render", function(dt)
+					local c = camera()
+					if not c or not anchor.Parent then return end
+					local cf = c.CFrame
+					local d = Vector3.zero
+					if not typing() then
+						if UserInputService:IsKeyDown(Enum.KeyCode.W) then d += cf.LookVector end
+						if UserInputService:IsKeyDown(Enum.KeyCode.S) then d -= cf.LookVector end
+						if UserInputService:IsKeyDown(Enum.KeyCode.A) then d -= cf.RightVector end
+						if UserInputService:IsKeyDown(Enum.KeyCode.D) then d += cf.RightVector end
+						if UserInputService:IsKeyDown(Enum.KeyCode.Space) then d += Vector3.yAxis end
+						if UserInputService:IsKeyDown(Enum.KeyCode.LeftControl) then d -= Vector3.yAxis end
+					end
+					if d.Magnitude > 1e-4 then
+						anchor.CFrame = anchor.CFrame + d.Unit * ctx.s.speed * math.min(dt, 0.1)
+					end
+				end)
+			end,
+		},
+	},
+})
+
+Runtime.register({
+	id = "optimizer",
+	name = "FPS Booster",
+	category = "World",
+	desc = "Fully reversible, every change is snapshotted and restored.",
+	conflicts = { "fullbright", "xray" },
+	methods = (function()
+		local function tier(level)
+			return function(ctx)
+				local R = ctx.restorer
+				local scrubbed = setmetatable({}, { __mode = "k" })
+
+				local function scrub(inst)
+					if scrubbed[inst] then return end
+					scrubbed[inst] = true
+
+					if inst:IsA("ParticleEmitter") or inst:IsA("Trail") or inst:IsA("Beam")
+						or inst:IsA("Smoke") or inst:IsA("Fire") or inst:IsA("Sparkles") then
+						R.set(inst, "Enabled", false)
+						return
+					end
+
+					if level >= 2 then
+						if inst:IsA("Decal") or inst:IsA("Texture") then
+							R.set(inst, "Transparency", 1)
+							return
+						elseif inst:IsA("MeshPart") then
+							R.set(inst, "RenderFidelity", Enum.RenderFidelity.Performance)
+							R.set(inst, "Material", Enum.Material.SmoothPlastic)
+							R.set(inst, "Reflectance", 0)
+							R.set(inst, "CastShadow", false)
+							return
+						elseif inst:IsA("BasePart") then
+							R.set(inst, "Material", Enum.Material.SmoothPlastic)
+							R.set(inst, "Reflectance", 0)
+							R.set(inst, "CastShadow", false)
+							return
+						end
+					end
+
+					if level >= 3 and (inst:IsA("PointLight") or inst:IsA("SpotLight")
+						or inst:IsA("SurfaceLight")) then
+						R.set(inst, "Enabled", false)
+						return
+					end
+
+					if level >= 4 and inst:IsA("Sound") then
+						R.set(inst, "Volume", 0)
+					end
+				end
+
+				R.set(Lighting, "GlobalShadows", false)
+				R.set(Lighting, "FogEnd", 1e6)
+				for _, e in ipairs(Lighting:GetChildren()) do
+					if e:IsA("PostEffect") then R.set(e, "Enabled", false) end
+				end
+
+				if level >= 3 then
+					local terrain = Workspace:FindFirstChildOfClass("Terrain")
+					if terrain then
+						R.set(terrain, "Decoration", false)
+						R.set(terrain, "WaterWaveSize", 0)
+						R.set(terrain, "WaterWaveSpeed", 0)
+						R.set(terrain, "WaterReflectance", 0)
+					end
+					pcall(function()
+						local r = settings().Rendering
+						local old = r.QualityLevel
+						r.QualityLevel = Enum.QualityLevel.Level01
+						ctx.maid:give(function() pcall(function() r.QualityLevel = old end) end)
+					end)
+				end
+
+				if level >= 4 and Env.setfpscap then
+					pcall(function() setfpscap(0) end)
+
+				end
+
+				local swept = 0
+				ctx.maid:give(task.spawn(function()
+					for _, d in ipairs(Workspace:GetDescendants()) do
+						if not (Char.model and d:IsDescendantOf(Char.model)) then
+							pcall(scrub, d)
+							swept += 1
+							if swept % 350 == 0 then task.wait() end
+						end
+					end
+					notify(("FPS booster applied to %d instances."):format(swept))
+				end))
+
+				local pending = {}
+				ctx.maid:give(Workspace.DescendantAdded:Connect(function(d)
+					pending[#pending + 1] = d
+				end))
+				ctx:throttled("heartbeat", 0.4, function()
+					if #pending == 0 then return end
+					local batch = pending
+					pending = {}
+					for _, d in ipairs(batch) do
+						if d.Parent then pcall(scrub, d) end
+					end
+				end)
+
+
+-- Created by and originally uploaded by https://robloxscripts.com/user/Fleece
+
+				if level >= 3 then
+					ctx:throttled("heartbeat", 0.3, function()
+						for _, p in ipairs(Players:GetPlayers()) do
+							if p ~= LP and p.Character then
+								for _, part in ipairs(p.Character:GetDescendants()) do
+									if part:IsA("BasePart") then part.LocalTransparencyModifier = 1 end
+								end
+							end
+						end
+					end)
+					ctx.maid:give(function()
+						for _, p in ipairs(Players:GetPlayers()) do
+							if p ~= LP and p.Character then
+								for _, part in ipairs(p.Character:GetDescendants()) do
+									pcall(function() part.LocalTransparencyModifier = 0 end)
+								end
+							end
+						end
+					end)
+				end
+			end
+		end
+
+		return {
+			{ id = "light", name = "Light", tag = "effects off", requiresChar = false, start = tier(1) },
+			{ id = "medium", name = "Medium", tag = "+ textures", requiresChar = false, start = tier(2) },
+			{ id = "potato", name = "Potato", tag = "+ players hidden", requiresChar = false, start = tier(3) },
+			{ id = "nuclear", name = "Nuclear", tag = "+ audio off", requiresChar = false, start = tier(4) },
+		}
+	end)(),
+})
+
+Runtime.register({
+	id = "gravity",
+	name = "Gravity",
+	category = "World",
+	desc = "Client-side gravity. 196.2 is the Roblox default.",
+	conflicts = { "jumppower" },
+	settingOrder = { "value" },
+	settings = {
+		value = { type = "slider", label = "Gravity", min = 0, max = 250, step = 2, default = 60 },
+	},
+	methods = {
+		{
+			id = "workspace", name = "Workspace.Gravity", tag = "global",
+			requiresChar = false,
+			start = function(ctx)
+				ctx:restore(Workspace, "Gravity")
+				ctx:throttled("heartbeat", 0.1, function()
+					Workspace.Gravity = ctx.s.value
+				end)
+			end,
+		},
+		{
+			id = "force", name = "Counter Force (VectorForce)", tag = "you only",
+			start = function(ctx)
+				local att = ctx.maid:give(new("Attachment", { Parent = Char.root }))
+				local vf = ctx.maid:give(new("VectorForce", {
+					Attachment0 = att,
+					RelativeTo = Enum.ActuatorRelativeTo.World,
+					Force = Vector3.zero,
+					Parent = Char.root,
+				}))
+				ctx:every("heartbeat", function()
+					if not alive() or not vf.Parent then return end
+					local deficit = Workspace.Gravity - ctx.s.value
+					vf.Force = Vector3.new(0, Char.root.AssemblyMass * deficit, 0)
+				end)
+			end,
+		},
+	},
+})
+
+Runtime.register({
+	id = "timeofday",
+	name = "Time of Day",
+	category = "World",
+	desc = "Lock the clock.",
+	settingOrder = { "hour" },
+	settings = {
+		hour = { type = "slider", label = "Hour", min = 0, max = 24, step = 0.5, default = 14 },
+	},
+	methods = {
+		{
+			id = "clocktime", name = "ClockTime", tag = "numeric",
+			requiresChar = false,
+			start = function(ctx)
+				ctx:restore(Lighting, "ClockTime")
+				ctx:throttled("heartbeat", 0.2, function()
+					Lighting.ClockTime = ctx.s.hour % 24
+				end)
+			end,
+		},
+		{
+			id = "timeofday", name = "TimeOfDay string", tag = "string",
+			requiresChar = false,
+			start = function(ctx)
+				ctx:restore(Lighting, "TimeOfDay")
+				ctx:throttled("heartbeat", 0.2, function()
+					local h = math.floor(ctx.s.hour)
+					local m = math.floor((ctx.s.hour - h) * 60)
+					Lighting.TimeOfDay = ("%02d:%02d:00"):format(h % 24, m)
+				end)
+			end,
+		},
+	},
+})
+
+local tpMethod = "direct"
+local waypoints = {}
+local redrawWaypoints = function() end
+
+local function doTeleport(target)
+	if not alive() then
+		notify("No character to teleport.", "bad")
+		return false
+	end
+	local goal = typeof(target) == "CFrame" and target or CFrame.new(target)
+	if not isFinite(goal.Position.X) or not isFinite(goal.Position.Y) or not isFinite(goal.Position.Z) then
+		notify("That destination is not a valid position.", "bad")
+		return false
+	end
+
+	if tpMethod == "direct" then
+		Char.root.CFrame = goal
+
+	elseif tpMethod == "chunk" then
+		task.spawn(function()
+			local step, guard = 60, 0
+			while alive() and guard < 500 do
+				local root = Char.root
+				local delta = goal.Position - root.Position
+				if delta.Magnitude <= step then break end
+				guard += 1
+				root.CFrame = root.CFrame + delta.Unit * step
+				root.AssemblyLinearVelocity = Vector3.zero
+				task.wait()
+			end
+			if alive() then Char.root.CFrame = goal end
+		end)
+
+	elseif tpMethod == "tween" then
+		local dist = (Char.root.Position - goal.Position).Magnitude
+		local duration = math.clamp(dist / 120, 0.15, 12)
+		TweenService:Create(Char.root, TweenInfo.new(duration, Enum.EasingStyle.Linear),
+			{ CFrame = goal }):Play()
+
+	elseif tpMethod == "seat" then
+		local seat = Char.hum and Char.hum.SeatPart
+		if seat then
+			seat.CFrame = goal * CFrame.new(0, 2, 0)
+		else
+			Char.root.CFrame = goal
+			notify("Not seated, used a direct write instead.", "warn")
+		end
+	end
+	return true
+end
+
+do
+	local card = makeCard("Teleport", "Teleport Engine", "This method applies to every teleport action below.")
+
+	local slot = labelRow(card, "Method", 2)
+	Dropdown(slot, {
+		items = {
+			{ value = "direct", text = "Direct CFrame", note = "instant" },
+			{ value = "chunk", text = "Chunked Steps", note = "beats delta checks" },
+			{ value = "tween", text = "Tween", note = "speed-capped" },
+			{ value = "seat", text = "Seat Move", note = "if seated" },
+		},
+		value = tpMethod,
+		zindex = 15,
+		onChange = function(v) tpMethod = v end,
+	})
+
+	local savedCFrame = nil
+	local row = new("Frame", {
+		BackgroundTransparency = 1, Size = UDim2.new(1, 0, 0, 34),
+		LayoutOrder = 3, ZIndex = 13, Parent = card,
+	})
+	hlist(row, 8)
+	Button(row, {
+		text = "Mark spot", order = 1, size = UDim2.new(0.5, -4, 0, 34),
+		onClick = function()
+			if not alive() then return notify("No character.", "bad") end
+			savedCFrame = Char.root.CFrame
+			notify("Position marked.")
+		end,
+	})
+	Button(row, {
+		text = "Return to mark", order = 2, size = UDim2.new(0.5, -4, 0, 34),
+		onClick = function()
+			if not savedCFrame then return notify("Nothing marked yet.", "warn") end
+			doTeleport(savedCFrame)
+		end,
+	})
+end
+
+do
+	local card = makeCard("Teleport", "Go To Player", "Uses the teleport engine method above.")
+
+	local targetValue = "@nearest"
+	local slot = labelRow(card, "Player", 2)
+	local dd = Dropdown(slot, {
+		items = playerItems(true),
+		value = targetValue,
+		zindex = 15,
+		onChange = function(v) targetValue = v end,
+	})
+	registerPlayerDropdown(dd, true)
+
+	local row = new("Frame", {
+		BackgroundTransparency = 1, Size = UDim2.new(1, 0, 0, 34),
+		LayoutOrder = 4, ZIndex = 13, Parent = card,
+	})
+	hlist(row, 8)
+	Button(row, {
+		text = "Teleport", order = 1, size = UDim2.new(0.5, -4, 0, 34), primary = true,
+		onClick = function()
+			local tr = targetRootOf(resolveTarget(targetValue))
+			if not tr then return notify("That target has no living character.", "bad") end
+			doTeleport(tr.CFrame * CFrame.new(0, 0, 4))
+		end,
+	})
+	Button(row, {
+		text = "Behind them", order = 2, size = UDim2.new(0.5, -4, 0, 34),
+		onClick = function()
+			local tr = targetRootOf(resolveTarget(targetValue))
+			if not tr then return notify("That target has no living character.", "bad") end
+			doTeleport(tr.CFrame * CFrame.new(0, 0, 3.5))
+		end,
+	})
+end
+
+do
+	local card = makeCard("Teleport", "Waypoints", "Saved into the config file for this place.")
+
+	local nameField = TextField(card, { placeholder = "Waypoint name", order = 2 })
+
+	local listFrame = new("ScrollingFrame", {
+		BackgroundColor3 = T.field,
+		Size = UDim2.new(1, 0, 0, 150),
+		BorderSizePixel = 0,
+		ScrollBarThickness = 5,
+		ScrollBarImageColor3 = T.scroll,
+		CanvasSize = UDim2.new(),
+		AutomaticCanvasSize = Enum.AutomaticSize.Y,
+		ScrollingDirection = Enum.ScrollingDirection.Y,
+		LayoutOrder = 3,
+		ZIndex = 13,
+		Parent = card,
+	})
+	corner(listFrame, 10)
+	stroke(listFrame, T.panelLine)
+	pad(listFrame, 5, 5, 5, 5)
+	vlist(listFrame, 2)
+
+	local emptyLabel = new("TextLabel", {
+		BackgroundTransparency = 1,
+		Size = UDim2.new(1, 0, 0, 32),
+		Font = FONT,
+		Text = "  No waypoints saved yet",
+		TextSize = 12,
+		TextColor3 = T.tag,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		ZIndex = 14,
+		Parent = listFrame,
+	})
+
+	redrawWaypoints = function()
+		for _, c in ipairs(listFrame:GetChildren()) do
+			if c:IsA("TextButton") then c:Destroy() end
+		end
+		emptyLabel.Visible = #waypoints == 0
+		for i, wp in ipairs(waypoints) do
+			local rowBtn = new("TextButton", {
+				BackgroundColor3 = T.rowHover,
+				BackgroundTransparency = 1,
+				Size = UDim2.new(1, 0, 0, 30),
+				Text = "",
+				AutoButtonColor = false,
+				BorderSizePixel = 0,
+				LayoutOrder = i,
+				ZIndex = 14,
+				Parent = listFrame,
+			})
+			corner(rowBtn, 6)
+			pad(rowBtn, 0, 0, 10, 6)
+
+			new("TextLabel", {
+				BackgroundTransparency = 1,
+				Size = UDim2.new(1, -66, 1, 0),
+				Font = FONT,
+				Text = wp.name,
+				TextSize = 12,
+				TextColor3 = T.label,
+				TextXAlignment = Enum.TextXAlignment.Left,
+				TextTruncate = Enum.TextTruncate.AtEnd,
+				ZIndex = 15,
+				Parent = rowBtn,
+			})
+
+			local del = new("TextButton", {
+				BackgroundTransparency = 1,
+				AnchorPoint = Vector2.new(1, 0.5),
+				Position = UDim2.new(1, 0, 0.5, 0),
+				Size = UDim2.fromOffset(52, 24),
+				Font = FONT,
+				Text = "remove",
+				TextSize = 11,
+				TextColor3 = T.tag,
+				AutoButtonColor = false,
+				ZIndex = 16,
+				Parent = rowBtn,
+			})
+			del.MouseEnter:Connect(function() del.TextColor3 = T.red end)
+			del.MouseLeave:Connect(function() del.TextColor3 = T.tag end)
+			del.Activated:Connect(function()
+				for idx, w in ipairs(waypoints) do
+					if w == wp then table.remove(waypoints, idx) break end
+				end
+				redrawWaypoints()
+			end)
+
+			rowBtn.MouseEnter:Connect(function() tw(rowBtn, EASE_FAST, { BackgroundTransparency = 0 }) end)
+			rowBtn.MouseLeave:Connect(function() tw(rowBtn, EASE_FAST, { BackgroundTransparency = 1 }) end)
+			rowBtn.Activated:Connect(function()
+				doTeleport(CFrame.new(wp.x, wp.y, wp.z))
+			end)
+		end
+	end
+	redrawWaypoints()
+
+	Button(card, {
+		text = "Save current position", order = 4, primary = true,
+		onClick = function()
+			if not alive() then return notify("No character.", "bad") end
+			local name = nameField.get():gsub("^%s+", ""):gsub("%s+$", "")
+			if name == "" then name = "Point " .. tostring(#waypoints + 1) end
+			local p = Char.root.Position
+			table.insert(waypoints, { name = name, x = p.X, y = p.Y, z = p.Z })
+			nameField.box.Text = ""
+			redrawWaypoints()
+			notify(("Saved '%s'."):format(name))
+		end,
+	})
+end
+
+do
+	local card = makeCard("Server", "Server Tools",
+		("Place %d - %d players online"):format(game.PlaceId, #Players:GetPlayers()))
+
+	local hopping = false
+	local function hop()
+		if hopping then return notify("Already looking for a server.", "warn") end
+		if not Env.httpget then return notify("This executor has no HttpGet.", "bad") end
+		hopping = true
+		notify("Looking for a server…")
+		task.spawn(function()
+			local ok, body = pcall(function()
+				return game:HttpGet(("https://games.roblox.com/v1/games/%d/servers/Public?sortOrder=Desc&limit=100")
+					:format(game.PlaceId))
+			end)
+			if not ok then
+				hopping = false
+				return notify("Server list request failed.", "bad")
+			end
+			local okDecode, data = pcall(function() return HttpService:JSONDecode(body) end)
+			if not okDecode or type(data) ~= "table" or type(data.data) ~= "table" then
+				hopping = false
+				return notify("Could not parse the server list.", "bad")
+			end
+
+			local candidates = {}
+			for _, s in ipairs(data.data) do
+				if s.id and s.id ~= game.JobId and type(s.playing) == "number"
+					and type(s.maxPlayers) == "number" and s.playing < s.maxPlayers then
+					table.insert(candidates, s)
+				end
+			end
+			if #candidates == 0 then
+				hopping = false
+				return notify("No other servers with room.", "warn")
+			end
+			local pick = candidates[math.random(1, #candidates)]
+			notify(("Hopping to a %d-player server…"):format(pick.playing))
+			local okTp = pcall(function()
+				TeleportService:TeleportToPlaceInstance(game.PlaceId, pick.id, LP)
+			end)
+			if not okTp then
+				hopping = false
+				notify("Teleport was rejected.", "bad")
+			end
+		end)
+	end
+
+	local row1 = new("Frame", {
+		BackgroundTransparency = 1, Size = UDim2.new(1, 0, 0, 34),
+		LayoutOrder = 2, ZIndex = 13, Parent = card,
+	})
+	hlist(row1, 8)
+	Button(row1, { text = "Server hop", order = 1, size = UDim2.new(0.5, -4, 0, 34), primary = true, onClick = hop })
+	Button(row1, {
+		text = "Rejoin", order = 2, size = UDim2.new(0.5, -4, 0, 34),
+		onClick = function()
+			TeleportService:TeleportToPlaceInstance(game.PlaceId, game.JobId, LP)
+		end,
+	})
+
+	local row2 = new("Frame", {
+		BackgroundTransparency = 1, Size = UDim2.new(1, 0, 0, 34),
+		LayoutOrder = 3, ZIndex = 13, Parent = card,
+	})
+	hlist(row2, 8)
+	Button(row2, {
+		text = "Copy Job ID", order = 1, size = UDim2.new(0.5, -4, 0, 34),
+		onClick = function()
+			if Env.setclipboard then
+				setclipboard(game.JobId)
+				notify("JobId copied.")
+			else
+				notify("JobId: " .. game.JobId, nil, 10)
+			end
+		end,
+	})
+	Button(row2, {
+		text = "Copy join script", order = 2, size = UDim2.new(0.5, -4, 0, 34),
+		onClick = function()
+			local snippet = ('game:GetService("TeleportService"):TeleportToPlaceInstance(%d, "%s")')
+				:format(game.PlaceId, game.JobId)
+			if Env.setclipboard then
+				setclipboard(snippet)
+				notify("Join snippet copied.")
+			else
+				notify(snippet, nil, 10)
+			end
+		end,
+	})
+end
+
+do
+	local card = makeCard("Server", "Anti-Kick / Anti-Teleport", "Blocks the common eject paths.")
+
+	local blockKick, blockTp = false, false
+	local hookMaid = Maid.new()
+	rootMaid:give(hookMaid)
+	local hookInstalled = false
+
+	local function syncHook()
+		local wanted = blockKick or blockTp
+		if wanted == hookInstalled then return end
+		if wanted then
+			local original
+			original = hookmetamethod(game, "__namecall", newcclosure(function(self, ...)
+				local method = getnamecallmethod()
+				if not checkcaller() then
+					if blockKick and method == "Kick" and self == LP then return nil end
+					if blockTp and self == TeleportService
+						and (method == "Teleport" or method == "TeleportToPlaceInstance"
+							or method == "TeleportToPrivateServer") then
+						return nil
+					end
+				end
+				return original(self, ...)
+			end))
+			hookMaid:give(function()
+				pcall(function() hookmetamethod(game, "__namecall", original) end)
+			end)
+			hookInstalled = true
+		else
+			hookMaid:clean()
+			hookInstalled = false
+		end
+	end
+
+	local hookNeeds = { "hookmetamethod", "newcclosure", "checkcaller", "getnamecallmethod" }
+	local canHook, missingHook = capable(hookNeeds)
+
+	local function makeBlockToggle(label, orderIdx, setter)
+		local slot = labelRow(card, label, orderIdx, 28)
+		Toggle(slot, {
+			zindex = 15,
+			onChange = function(v)
+				if v and not canHook then
+					notify(("Needs %s(), which this executor doesn't have."):format(missingHook), "bad")
+					return false
+				end
+				setter(v)
+				syncHook()
+				notify(("%s %s."):format(label, v and "enabled" or "disabled"))
+				return true
+			end,
+		})
+	end
+
+	makeBlockToggle("Block kick", 2, function(v) blockKick = v end)
+	makeBlockToggle("Block TP", 3, function(v) blockTp = v end)
+end
+
+
+-- Created by and originally uploaded by https://robloxscripts.com/user/Fleece
+
+do
+	local card = makeCard("Config", "Interface", "Keybinds and window behaviour.")
+
+	local slot = labelRow(card, "Toggle UI", 2)
+	KeybindPicker(slot, {
+		value = uiToggleKey,
+		zindex = 15,
+		onChange = function(k)
+			uiToggleKey = k
+			notify("UI toggle bound to " .. (k and k.Name or "nothing") .. ".")
+		end,
+	})
+
+	local slot2 = labelRow(card, "Perf meter", 3, 28)
+	Toggle(slot2, {
+		value = true,
+		zindex = 15,
+		onChange = function(v)
+			perfLabel.Visible = v
+
+			Scheduler.profiling = v
+			if not v then perfLabel.Text = "" end
+			return true
+		end,
+	})
+end
+
+do
+	local card = makeCard("Config", "Profile", "Saves toggles, methods, sliders, keybinds and waypoints.")
+
+	local function snapshot()
+		local out = { features = {}, waypoints = waypoints, tpMethod = tpMethod, version = 2 }
+		for id, st in pairs(Runtime.state) do
+			out.features[id] = {
+				enabled = st.enabled,
+				method = st.method,
+				settings = st.settings,
+				keybind = st.keybind,
+			}
+		end
+		if uiToggleKey then out.uiToggleKey = uiToggleKey.Name end
+		return out
+	end
+
+	local row = new("Frame", {
+		BackgroundTransparency = 1, Size = UDim2.new(1, 0, 0, 34),
+		LayoutOrder = 2, ZIndex = 13, Parent = card,
+	})
+	hlist(row, 8)
+
+	Button(row, {
+		text = "Save", order = 1, size = UDim2.new(0.34, -6, 0, 34), primary = true,
+		onClick = function()
+			local ok, err = Config.save(snapshot())
+			notify(ok and "Config saved." or ("Save failed: " .. tostring(err)), ok and "good" or "bad", 5)
+		end,
+	})
+
+	Button(row, {
+		text = "Load", order = 2, size = UDim2.new(0.33, -6, 0, 34),
+		onClick = function()
+			local data, err = Config.load()
+			if not data then
+				return notify(err and ("Load failed: " .. err) or "No saved config for this place.", "warn", 5)
+			end
+
+			local applied, failed = 0, 0
+			for id, saved in pairs(data.features or {}) do
+				local st, h = Runtime.state[id], uiHandles[id]
+				if st and h then
+					for k, v in pairs(saved.settings or {}) do
+						if st.settings[k] ~= nil then
+							st.settings[k] = v
+							local widget = h.settings[k]
+							if widget and widget.set then pcall(widget.set, v, false) end
+						end
+					end
+
+					if saved.method then
+
+						local valid = false
+						for _, m in ipairs(Features[id].methods) do
+							if m.id == saved.method and capable(m.needs) then valid = true break end
+						end
+						if valid then
+							st.method = saved.method
+							h.method.set(saved.method, false)
+						end
+					end
+
+					if saved.keybind then
+
+						local okKey, code = pcall(function() return Enum.KeyCode[saved.keybind] end)
+						if okKey and code then
+							st.keybind = saved.keybind
+							featureBinds[code] = id
+							h.keybind.set(code)
+						end
+					end
+
+					if saved.enabled and not st.enabled then
+						if Runtime.setEnabled(id, true) then
+							h.toggle.set(true)
+							applied += 1
+						else
+							h.toggle.set(false)
+							failed += 1
+						end
+					elseif not saved.enabled and st.enabled then
+						Runtime.setEnabled(id, false)
+						h.toggle.set(false)
+					end
+				end
+			end
+
+			if type(data.waypoints) == "table" then
+				waypoints = data.waypoints
+				redrawWaypoints()
+			end
+			if data.tpMethod then tpMethod = data.tpMethod end
+			if data.uiToggleKey then
+				local okKey, code = pcall(function() return Enum.KeyCode[data.uiToggleKey] end)
+				if okKey and code then uiToggleKey = code end
+			end
+
+			notify(failed > 0
+				and ("Config loaded, %d on, %d could not start."):format(applied, failed)
+				or "Config loaded.", failed > 0 and "warn" or "good", 5)
+		end,
+	})
+
+	Button(row, {
+		text = "Turn all off", order = 3, size = UDim2.new(0.33, -6, 0, 34),
+		onClick = function()
+			local n = 0
+			for id, st in pairs(Runtime.state) do
+				if st.enabled then
+					Runtime.setEnabled(id, false)
+					local h = uiHandles[id]
+					if h then h.toggle.set(false) end
+					n += 1
+				end
+			end
+			notify(n > 0 and ("Turned off %d feature%s."):format(n, n == 1 and "" or "s")
+				or "Nothing was on.")
+		end,
+	})
+end
+
+do
+	local card = makeCard("Config", "Log", "Everything the panel reports.")
+
+	local logView = new("ScrollingFrame", {
+		BackgroundColor3 = T.logBg,
+		Size = UDim2.new(1, 0, 0, 190),
+		BorderSizePixel = 0,
+		ScrollBarThickness = 5,
+		ScrollBarImageColor3 = T.scroll,
+		CanvasSize = UDim2.new(),
+		AutomaticCanvasSize = Enum.AutomaticSize.Y,
+		ScrollingDirection = Enum.ScrollingDirection.Y,
+		LayoutOrder = 2,
+		ZIndex = 13,
+		Parent = card,
+	})
+	corner(logView, 10)
+	stroke(logView, T.panelLine)
+	pad(logView, 9, 9, 11, 9)
+
+	local logText = new("TextLabel", {
+		BackgroundTransparency = 1,
+		Size = UDim2.new(1, 0, 0, 0),
+		AutomaticSize = Enum.AutomaticSize.Y,
+		Font = FONT_MONO,
+		Text = "",
+		TextSize = 12,
+		TextColor3 = T.logText,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		TextYAlignment = Enum.TextYAlignment.Top,
+		TextWrapped = true,
+		ZIndex = 14,
+		Parent = logView,
+	})
+
+	local pendingScroll = false
+	logRefresh = function()
+		logText.Text = table.concat(logLines, "\n")
+		if pendingScroll then return end
+		pendingScroll = true
+		task.defer(function()
+			pendingScroll = false
+			if logView.Parent then
+				logView.CanvasPosition = Vector2.new(0, logView.AbsoluteCanvasSize.Y)
+			end
+		end)
+	end
+
+	local row = new("Frame", {
+		BackgroundTransparency = 1, Size = UDim2.new(1, 0, 0, 34),
+		LayoutOrder = 3, ZIndex = 13, Parent = card,
+	})
+	hlist(row, 8)
+	Button(row, {
+		text = "Clear", order = 1, size = UDim2.new(0.5, -4, 0, 34),
+		onClick = function()
+			table.clear(logLines)
+			logRefresh()
+		end,
+	})
+	Button(row, {
+		text = "Copy", order = 2, size = UDim2.new(0.5, -4, 0, 34),
+		onClick = function()
+			if Env.setclipboard then
+				setclipboard(table.concat(logLines, "\n"))
+				notify("Log copied.")
+			else
+				notify("This executor has no setclipboard().", "bad")
+			end
+		end,
+	})
+end
+
+do
+	local card = makeCard("Config", "Environment", "What this executor supports.")
+
+	local supported, missing = {}, {}
+	for _, n in ipairs({ "hookmetamethod", "getnamecallmethod", "getconnections",
+		"firetouchinterest", "setfpscap", "writefile", "setclipboard", "gethui",
+		"Drawing", "newcclosure", "checkcaller" }) do
+		table.insert(Env[n] and supported or missing, n)
+	end
+
+	new("TextLabel", {
+		BackgroundTransparency = 1,
+		Size = UDim2.new(1, 0, 0, 0),
+		AutomaticSize = Enum.AutomaticSize.Y,
+		Font = FONT_MONO,
+		Text = ("available   %s\n\nmissing     %s"):format(
+			#supported > 0 and table.concat(supported, ", ") or "none",
+			#missing > 0 and table.concat(missing, ", ") or "none"
+		),
+		TextSize = 12,
+		TextColor3 = T.muted,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		TextWrapped = true,
+		LayoutOrder = 2,
+		ZIndex = 14,
+		Parent = card,
+	})
+
+	Button(card, {
+		text = "Unload " .. SHORT, order = 3,
+		onClick = function()
+			confirmDialog(
+				"Unload " .. SHORT .. "?",
+				"Every feature will be switched off, all settings return to their "
+					.. "defaults and the panel removes itself completely.",
+				"Unload",
+				function()
+					local fn = getgenv()[UNLOAD_KEY]
+					if fn then fn() end
+				end
+			)
+		end,
+	})
+end
+
+do
+	local byCategory = {}
+	for _, id in ipairs(featureOrder) do
+		local def = Features[id]
+		byCategory[def.category] = byCategory[def.category] or {}
+		table.insert(byCategory[def.category], def)
+	end
+	for _, list in pairs(byCategory) do
+		table.sort(list, function(a, b) return a.name < b.name end)
+	end
+	for _, cat in ipairs(TABS) do
+		for _, def in ipairs(byCategory[cat] or {}) do
+			renderFeature(def)
+		end
+	end
+end
+
+if uiHandles.fling and uiHandles.fling.settings.target then
+	registerPlayerDropdown(uiHandles.fling.settings.target, true)
+end
+
+do
+	local function snapRow(row, layout)
+		local kids = {}
+		for _, c in ipairs(row:GetChildren()) do
+			if c:IsA("GuiObject") then table.insert(kids, c) end
+		end
+		if #kids == 0 then return end
+		table.sort(kids, function(a, b) return a.LayoutOrder < b.LayoutOrder end)
+
+		local gap = layout.Padding.Offset
+		local total = row.AbsoluteSize.X - gap * (#kids - 1)
+		if total <= 0 then return end
+		local base = math.floor(total / #kids)
+		local extra = total - base * #kids
+		for i, c in ipairs(kids) do
+			c.Size = UDim2.fromOffset(base + (i <= extra and 1 or 0), c.Size.Y.Offset)
+		end
+	end
+
+	for _, entry in ipairs(cards) do
+		for _, d in ipairs(entry.frame:GetDescendants()) do
+			if d:IsA("UIListLayout") and d.FillDirection == Enum.FillDirection.Horizontal then
+				local row = d.Parent
+				local allScaled = true
+				local any = false
+				for _, c in ipairs(row:GetChildren()) do
+					if c:IsA("GuiObject") then
+						any = true
+						if c.Size.X.Scale == 0 then allScaled = false end
+					end
+				end
+				if any and allScaled then
+					local function relayout() snapRow(row, d) end
+					rootMaid:give(row:GetPropertyChangedSignal("AbsoluteSize"):Connect(relayout))
+					task.defer(relayout)
+				end
+			end
+		end
+	end
+end
+
+emptyState.LayoutOrder = order + 1
+
+for _, entry in ipairs(cards) do
+	entry.fade = buildFade(entry.frame)
+end
+
+refreshVisibility(false)
+
+rootMaid:give(UserInputService.InputBegan:Connect(function(input, processed)
+	if input.UserInputType ~= Enum.UserInputType.Keyboard then return end
+
+	if listening then
+		listening.apply(input.KeyCode)
+		return
+	end
+	if processed or typing() then return end
+
+	if uiToggleKey and input.KeyCode == uiToggleKey then
+		if not screen.Enabled then
+			screen.Enabled = true
+			if not minimized then return end
+		end
+		if minimized then doRestore() else doMinimize() end
+		return
+	end
+
+	local featureId = featureBinds[input.KeyCode]
+	if featureId then
+		local st = Runtime.state[featureId]
+		local want = not st.enabled
+		local ok = Runtime.setEnabled(featureId, want)
+		local h = uiHandles[featureId]
+		if h then h.toggle.set(ok and want) end
+		if ok then
+			notify(("%s %s."):format(Features[featureId].name, want and "on" or "off"), nil, 1.5)
+		end
+	end
+end))
+
+do
+	local frames, acc = 0, 0
+	Scheduler.add("heartbeat", "\0perf", function(dt)
+		frames += 1
+		acc += dt
+		if acc >= 0.5 then
+			local fps = math.floor(frames / acc + 0.5)
+			local activeCount = 0
+			for _ in pairs(Runtime.active) do activeCount += 1 end
+			local total = 0
+			for _, ms in pairs(Scheduler.cost) do total += ms end
+			perfLabel.Text = ("%d fps\n%d on - %.2f ms"):format(fps, activeCount, total)
+			frames, acc = 0, 0
+		end
+	end)
+end
+
+local unloaded = false
+
+local function unload()
+	if unloaded then return end
+	unloaded = true
+
+	for id in pairs(Runtime.state) do pcall(Runtime.stop, id) end
+	Scheduler.stopAll()
+
+	for id, st in pairs(Runtime.state) do
+		local def = Features[id]
+		st.enabled = false
+		st.keybind = nil
+		st.method = def and def.methods[1].id or st.method
+		for key, meta in pairs((def and def.settings) or {}) do
+			st.settings[key] = meta.default
+		end
+	end
+
+	pcall(function() charMaid:destroy() end)
+	pcall(function() rootMaid:destroy() end)
+	pcall(function() screen:Destroy() end)
+
+	for inst in pairs(spawned) do
+		pcall(function()
+			if inst.Parent ~= nil then inst:Destroy() end
+		end)
+	end
+	table.clear(spawned)
+
+	table.clear(featureBinds)
+	table.clear(uiHandles)
+	table.clear(Runtime.active)
+	table.clear(playerDropdowns)
+	table.clear(logLines)
+	table.clear(lastNotifyAt)
+	table.clear(Char.onRespawn)
+	Char.model, Char.hum, Char.root = nil, nil, nil
+
+	local registry = getgenv().__fleeceRegistry
+	if type(registry) == "table" then
+		for i = #registry, 1, -1 do
+			if registry[i] == unload then table.remove(registry, i) end
+		end
+		if #registry == 0 then getgenv().__fleeceRegistry = nil end
+	end
+	if getgenv()[UNLOAD_KEY] == unload then getgenv()[UNLOAD_KEY] = nil end
+	getgenv().VertexUnload = nil
+end
+
+getgenv()[UNLOAD_KEY] = unload
+getgenv().__fleeceRegistry = getgenv().__fleeceRegistry or {}
+table.insert(getgenv().__fleeceRegistry, unload)
+
+do
+	local parented = false
+	if Env.gethui then
+		parented = pcall(function() screen.Parent = gethui() end)
+	end
+	if not parented then
+		parented = pcall(function() screen.Parent = game:GetService("CoreGui") end)
+	end
+	if not parented then
+		screen.Parent = LP:WaitForChild("PlayerGui")
+	end
+
+	if Env.protectgui then pcall(function() protectgui(screen) end) end
+	pcall(function() syn.protect_gui(screen) end)
+
+	guiRoot = screen.Parent
+end
+
+do
+	local cam = Workspace.CurrentCamera
+	if cam then
+		rootMaid:give(cam:GetPropertyChangedSignal("ViewportSize"):Connect(function()
+			if minimized then return end
+			local size = shellRect.size
+			local p = centeredPos(size.X, size.Y)
+			shell.Position = offset(p.X, p.Y)
+		end))
+	end
+end
+
+do
+	local home = centeredPos(W, H)
+
+	canvas.GroupTransparency = 1
+	shell.BackgroundTransparency = 1
+	shellStroke.Transparency = 1
+	shell.Size = offset(px(W * 0.97), px(H * 0.97))
+	shell.Position = offset(home.X + px(W * 0.015), home.Y + 14)
+	screen.Enabled = true
+
+	chromeFadeTo(0, 0.20)
+	shellFadeTo(0, 0.30)
+	tw(shell, MOTION.window, {
+		Size = offset(W, H),
+		Position = offset(home.X, home.Y),
+	})
+end
+
+do
+	local featureCount, methodCount = 0, 0
+	for _, id in ipairs(featureOrder) do
+		featureCount += 1
+		methodCount += #Features[id].methods
+	end
+	pushLog(("Place %d - Job %s"):format(game.PlaceId, game.JobId))
+	pushLog(("%d features, %d methods. Method choice is manual."):format(featureCount, methodCount))
+	pushLog("Right Shift minimises and restores the panel. Each card has its own keybind slot.")
+	notify(("%s loaded, %d features, %d methods."):format(SHORT, featureCount, methodCount), "good", 5)
+end

@@ -1,0 +1,588 @@
+scriptname = "Tokkusatsu Hub v2.4.7"
+
+if not game:IsLoaded() then game.Loaded:Wait() end
+if Luna then Luna:Destroy() end
+
+function missing(t, f, fallback)
+    if type(f) == t then return f end
+    return fallback
+end
+
+function loadAnimation(char, animid)
+    local humanoid = char:WaitForChild("Humanoid")
+    local animator = humanoid:FindFirstChildOfClass("Animator")
+    if not animator then
+        animator = Instance.new("Animator") 
+        animator.Parent = humanoid
+    end
+    local anim = Instance.new("Animation")
+    anim.AnimationId = "rbxassetid://" .. tostring(animid)
+    return animator:LoadAnimation(anim)
+end
+
+function r15(plr)
+    return plr.Character:FindFirstChildOfClass('Humanoid').RigType == Enum.HumanoidRigType.R15
+end
+
+local cloneref = missing("function", cloneref, function(...) return ... end)
+local queueteleport = missing("function", queue_on_teleport or (syn and syn.queue_on_teleport) or (fluxus and fluxus.queue_on_teleport))
+
+-- vars
+local Players = cloneref(game:GetService("Players"))
+local HttpService = cloneref(game:GetService("HttpService"))
+local TeleportService = cloneref(game:GetService("TeleportService"))
+local PlaceId, JobId = game.PlaceId, game.JobId
+local LocalPlayer = Players.LocalPlayer
+local VirtualUser = game:service("VirtualUser")
+
+local JoinJobId
+local track = nil
+local jtask = nil
+local CURRENTTRACK
+local antiafk = false
+local Keep = true
+local TeleportCheck = false
+local sab_id = {
+    [109983668079237] = true,
+    [128762245270197] = true,
+    [96342491571673] = true
+}
+local pvb_id = {
+    [127742093697776] = true
+}
+local lt2_id = {
+    [13822889] = true
+}
+local arsenal_id = {
+    [286090429] = true
+}
+local counterblox_id = {
+    [301549746] = true
+}
+local jb_id = {
+    [606849621] = true,
+    [17190407811] = true,
+    [17190408132] = true,
+    [108098425719662] = true
+}
+local gag2_id = {
+    [97598239454123] = true
+}
+local rivals_id = {
+    [17625359962] = true,
+    [18126510175] = true,
+    [71874690745115] = true,
+    [117398147513099] = true,
+    [129604661913557] = true,
+    [133215910299950] = true
+}
+local unboxfactory_id = {
+    [138161219313147] = true
+}
+--
+
+Players.LocalPlayer.OnTeleport:Connect(function(State)
+	if Keep and (not TeleportCheck) and queueteleport then
+		TeleportCheck = true
+		queueteleport("loadstring(game:HttpGet('https://raw.githubusercontent.com/Royynn/nhub/refs/heads/main/nhub.lua'))()")
+	end
+end)
+
+task.spawn(function()
+    while task.wait(600) do
+        if antiafk then
+            VirtualUser:CaptureController()
+            VirtualUser:ClickButton2(Vector2.new())
+            mouse2click()
+        end
+    end
+end)
+
+local Luna = loadstring(game:HttpGet("https://raw.nebulasoftworks.xyz/luna", true))()
+local Window = Luna:CreateWindow({Name = scriptname, LoadingEnabled = false})
+
+-- MainTab
+local MainTab = Window:CreateTab({
+    Name = "Home",
+    Icon = "house",
+    ImageSource = "Material",
+    ShowTitle = false
+})
+local MainButton1 = MainTab:CreateToggle({
+    Name = "anti afk",
+    Description = nil,
+    CurrentValue = false,
+    Callback = function(Value)
+        antiafk = Value
+    end
+}, "Toggle")
+MainTab:CreateDivider()
+local MainButton2 = MainTab:CreateButton({
+    Name = "rejoin",
+    Description = nil,
+    Callback = function()
+        if #Players:GetPlayers() <= 1 then
+            Players.LocalPlayer:Kick("\nRejoining...")
+            wait()
+            TeleportService:Teleport(PlaceId, Players.LocalPlayer)
+        else
+            TeleportService:TeleportToPlaceInstance(PlaceId, JobId, Players.LocalPlayer)
+        end
+    end
+})
+local MainButton3 = MainTab:CreateButton({
+    Name = "serverhop",
+    Description = nil,
+    Callback = function()
+        local servers = {}
+        local req = game:HttpGet("https://games.roblox.com/v1/games/" .. PlaceId .. "/servers/Public?sortOrder=Desc&limit=100&excludeFullGames=true")
+        local body = HttpService:JSONDecode(req)
+        if body and body.data then
+            for i, v in next, body.data do
+                if type(v) == "table" and tonumber(v.playing) and tonumber(v.maxPlayers) and v.playing < v.maxPlayers and v.id ~= JobId then
+                    table.insert(servers, 1, v.id)
+                end
+            end
+        end
+        if #servers > 0 then
+            TeleportService:TeleportToPlaceInstance(PlaceId, servers[math.random(1, #servers)], Players.LocalPlayer)
+        else
+            Luna:Notification({ 
+                Title = "Serverhop",
+                Icon = "search",
+                ImageSource = "Material",
+                Content = "Couldn't find a server."
+            })
+        end
+    end
+})
+MainTab:CreateDivider()
+local MainButton7 = MainTab:CreateButton({
+    Name = "copy jobid",
+    Description = nil,
+    Callback = function()
+        setclipboard(JobId)
+        Luna:Notification({ 
+            Title = "JobId copied!",
+            Icon = "done",
+            ImageSource = "Material",
+            Content = JobId
+        })
+    end
+})
+local MainButton8 = MainTab:CreateInput({
+    Name = "jobid",
+    Description = nil,
+    PlaceholderText = "",
+    CurrentValue = "",
+    Numeric = false,
+    MaxCharacters = nil,
+    Enter = false,
+    Callback = function(Text)
+        JoinJobId = Text
+    end
+}, "Input")
+local MainButton9 = MainTab:CreateButton({
+    Name = "join",
+    Description = nil,
+    Callback = function()
+        TeleportService:TeleportToPlaceInstance(PlaceId, JoinJobId, Players.LocalPlayer)
+    end
+})
+MainTab:CreateDivider()
+local MainButton10 = MainTab:CreateButton({
+    Name = "copy placeid",
+    Description = nil,
+    Callback = function()
+        setclipboard(PlaceId)
+        Luna:Notification({ 
+            Title = "PlaceId copied!",
+            Icon = "done",
+            ImageSource = "Material",
+            Content = PlaceId
+        })
+    end
+})
+local MainButton11 = MainTab:CreateButton({
+    Name = "reload",
+    Description = nil,
+    Callback = function()
+        Keep = false
+        Luna:Destroy()
+        loadstring(game:HttpGet('https://raw.githubusercontent.com/Royynn/nhub/refs/heads/main/nhub.lua'))()
+        script:Destroy()
+    end
+})
+local MainButton12 = MainTab:CreateButton({
+    Name = "unload",
+    Description = nil,
+    Callback = function()
+        Keep = false
+        Luna:Destroy()
+        script:Destroy()
+    end
+})
+--
+-- UniversalTab
+local UniversalTab = Window:CreateTab({
+    Name = "Universal",
+    Icon = "menu",
+    ImageSource = "Material",
+    ShowTitle = true
+})
+local UniversalButton1 = UniversalTab:CreateSlider({
+    Name = "walkspeed",
+    Range = {16, 100},
+    Increment = 1,
+    CurrentValue = LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass('Humanoid').WalkSpeed or 16,
+    Callback = function(Value)
+        if LocalPlayer.Character then LocalPlayer.Character:FindFirstChildOfClass('Humanoid').WalkSpeed = Value end
+    end
+}, "Slider")
+UniversalTab:CreateDivider()
+local UniversalButton2 = UniversalTab:CreateButton({
+    Name = "infinite yield",
+    Description = nil,
+    Callback = function()
+        loadstring(game:HttpGet("https://raw.githubusercontent.com/EdgeIY/infiniteyield/master/source"))()
+    end
+})
+local UniversalButton3 = UniversalTab:CreateButton({
+    Name = "product faker",
+    Description = nil,
+    Callback = function()
+        loadstring(game:HttpGet("https://pastefy.app/yVlxzwk8/raw"))()
+    end
+})
+local UniversalButton4 = UniversalTab:CreateButton({
+    Name = "show server pos",
+    Description = nil,
+    Callback = function()
+        loadstring(game:HttpGet("https://raw.githubusercontent.com/Royynn/nhub/refs/heads/main/desync.lua"))()
+    end
+})
+local UniversalButton5 = UniversalTab:CreateButton({
+    Name = "friend 3sp",
+    Description = nil,
+    Callback = function()
+        loadstring(game:HttpGet("https://raw.githubusercontent.com/Royynn/nhub/refs/heads/main/friend3sp.lua"))()
+    end
+})
+UniversalTab:CreateDivider()
+local UniversalButton6 = UniversalTab:CreateButton({
+    Name = "cobalt",
+    Description = nil,
+    Callback = function()
+        loadstring(game:HttpGet("https://github.com/notpoiu/cobalt/releases/latest/download/Cobalt.luau"))()
+    end
+})
+local UniversalButton7 = UniversalTab:CreateButton({
+    Name = "dex",
+    Description = nil,
+    Callback = function()
+        loadstring(game:HttpGet("https://raw.githubusercontent.com/infyiff/backup/main/dex.lua"))()
+    end
+})
+local UniversalButton8 = UniversalTab:CreateButton({
+    Name = "xvc hub",
+    Description = nil,
+    Callback = function()
+        loadstring(game:HttpGet("https://pastebin.com/raw/Piw5bqGq"))()
+    end
+})
+--
+-- EmotesTab
+local EmotesTab = Window:CreateTab({
+    Name = "Emotes",
+    Icon = "accessibility_new",
+    ImageSource = "Material",
+    ShowTitle = true
+})
+local EmotesButton1 = EmotesTab:CreateToggle({
+    Name = "Jerk",
+    Description = nil,
+    CurrentValue = false,
+    Callback = function(Value)
+        if Value then
+            jtask = task.spawn(function()
+                while task.wait() do
+                    local isR15 = r15(LocalPlayer)
+                    if not track then
+                        track = loadAnimation(LocalPlayer.Character, not isR15 and 72042024 or 698251653)
+                    end
+                    track.Priority = Enum.AnimationPriority.Action4
+                    track:Play()
+                    track:AdjustSpeed(isR15 and 0.7 or 0.65)
+                    track.TimePosition = 0.6
+                    task.wait(0.1)
+                    while track and track.TimePosition < (not isR15 and 0.65 or 0.7) do task.wait(0.1) end
+                    if track then
+                        track:Stop()
+                        track = nil
+                    end
+                end
+            end)
+        else
+            if jtask then
+                task.cancel(jtask)
+                jtask = nil
+            end
+            if track then
+                track:Stop()
+                track = nil
+            end
+        end
+    end
+}, "Toggle")
+local EmotesButton2 = EmotesTab:CreateToggle({
+    Name = "Take The L",
+    Description = nil,
+    CurrentValue = false,
+    Callback = function(Value)
+        local char = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
+        local hrp = char:FindFirstChild("HumanoidRootPart")
+        if Value then
+            CURRENTTRACK = loadAnimation(char, 78653596566468)
+            CURRENTTRACK.Looped = true
+            CURRENTTRACK.Priority = Enum.AnimationPriority.Action4
+            CURRENTTRACK:Play(0, 99)
+            CURRENTTRACK:AdjustSpeed(1)
+        else
+            if CURRENTTRACK then
+                CURRENTTRACK:Stop(0)
+                CURRENTTRACK:Destroy()
+                CURRENTTRACK = nil
+            end
+        end
+    end
+}, "Toggle")
+local EmotesButton3 = EmotesTab:CreateButton({
+    Name = "ugc emote player",
+    Description = nil,
+    Callback = function()
+        loadstring(game:HttpGet("https://raw.githubusercontent.com/XVCHub/scripts/main/ugc-emote-player"))()
+    end
+})
+local EmotesButton4 = EmotesTab:CreateButton({
+    Name = "bundle animations",
+    Description = nil,
+    Callback = function()
+        loadstring(game:HttpGet("https://raw.githubusercontent.com/Bac0nHck/Scripts/refs/heads/main/BundleAnimations.lua"))()
+    end
+})
+--
+-- GameTab
+if sab_id[game.PlaceId] then
+    local GameTab = Window:CreateTab({
+        Name = "Steal A Gayvrot",
+        Icon = "star",
+        ImageSource = "Material",
+        ShowTitle = true
+    })
+    local GameButton1 = GameTab:CreateButton({
+        Name = "Chilli",
+        Description = nil,
+        Callback = function()
+            pcall(function()
+                loadstring(game:HttpGet("https://raw.githubusercontent.com/tienkhanh1/spicy/main/Chilli.lua", true))()
+            end)
+        end
+    })
+elseif lt2_id[game.PlaceId] then
+    local GameTab = Window:CreateTab({
+        Name = "Lumber Tycoon 2",
+        Icon = "star",
+        ImageSource = "Material",
+        ShowTitle = true
+    })
+    local GameButton1 = GameTab:CreateButton({
+        Name = "serverhop",
+        Description = nil,
+        Callback = function()
+            local servers = {}
+            local req = game:HttpGet("https://games.roblox.com/v1/games/" .. PlaceId .. "/servers/Public?sortOrder=Desc&limit=100&excludeFullGames=true")
+            local body = HttpService:JSONDecode(req)
+            if body and body.data then
+                for i, v in next, body.data do
+                    if type(v) == "table" and tonumber(v.playing) and tonumber(v.maxPlayers) and v.playing < v.maxPlayers and v.id ~= JobId then
+                        table.insert(servers, 1, v.id)
+                    end
+                end
+            end
+            if #servers > 0 then
+                TeleportService:TeleportToPlaceInstance(PlaceId, servers[math.random(1, #servers)], Players.LocalPlayer)
+            else
+                Luna:Notification({ 
+                    Title = "Serverhop",
+                    Icon = "search",
+                    ImageSource = "Material",
+                    Content = "Couldn't find a server."
+                })
+            end
+        end
+    })
+    local GameButton2 = GameTab:CreateToggle({
+        Name = "View LoneCave",
+        Description = nil,
+        CurrentValue = false,
+        Callback = function(Value)
+            workspace.CurrentCamera.CameraSubject = LocalPlayer.Character.Humanoid
+            if Value then
+                for _, v in pairs(workspace:GetChildren()) do
+                    if v.Name == "TreeRegion" and v:FindFirstChild("Model") and v.Model.TreeClass.Value == "LoneCave" then
+                        workspace.CurrentCamera.CameraSubject = v
+                        return
+                    end
+                end
+            end
+        end
+    }, "Toggle")
+    local GameButton3 = GameTab:CreateToggle({
+        Name = "View CaveCrawler",
+        Description = nil,
+        CurrentValue = false,
+        Callback = function(Value)
+            workspace.CurrentCamera.CameraSubject = LocalPlayer.Character.Humanoid
+            if Value then
+                for _, v in pairs(workspace:GetChildren()) do
+                    if v.Name == "TreeRegion" and v:FindFirstChild("Model") and v.Model.TreeClass.Value == "CaveCrawler" then
+                        workspace.CurrentCamera.CameraSubject = v
+                        return
+                    end
+                end
+            end
+        end
+    }, "Toggle")
+    local GameButton4 = GameTab:CreateButton({
+        Name = "Kron Hub",
+        Description = nil,
+        Callback = function()
+            loadstring(game:HttpGet('https://raw.githubusercontent.com/DevKron/Kron_Hub/refs/heads/main/version_1.0'))("")
+        end
+    })
+elseif arsenal_id[game.PlaceId] then
+    local GameTab = Window:CreateTab({
+        Name = "Arsenal",
+        Icon = "star",
+        ImageSource = "Material",
+        ShowTitle = true
+    })
+    local GameButton1 = GameTab:CreateButton({
+        Name = "TbaoHubArsenal",
+        Description = nil,
+        Callback = function()
+            loadstring(game:HttpGet("https://raw.githubusercontent.com/tbao143/thaibao/main/TbaoHubArsenal"))()
+        end
+    })
+elseif counterblox_id[game.PlaceId] then
+    local GameTab = Window:CreateTab({
+        Name = "Counter Blox",
+        Icon = "star",
+        ImageSource = "Material",
+        ShowTitle = true
+    })
+    local GameButton1 = GameTab:CreateButton({
+        Name = "solaris.lol",
+        Description = nil,
+        Callback = function()
+            loadstring(game:HttpGet("https://raw.githubusercontent.com/toasty-dev/pissblox/main/solaris_bootstrapper.lua",true))()
+        end
+    })
+elseif rivals_id[game.PlaceId] then
+    local GameTab = Window:CreateTab({
+        Name = "Rivals",
+        Icon = "star",
+        ImageSource = "Material",
+        ShowTitle = true
+    })
+    local GameButton1 = GameTab:CreateButton({
+        Name = "exploit.plus",
+        Description = nil,
+        Callback = function()
+            loadstring(game:HttpGet'https://exploit.plus/Loader')()
+        end
+    })
+elseif jb_id[game.PlaceId] then
+    local GameTab = Window:CreateTab({
+        Name = "Jail Break",
+        Icon = "star",
+        ImageSource = "Material",
+        ShowTitle = true
+    })
+    local GameButton1 = GameTab:CreateButton({
+        Name = "sexation",
+        Description = nil,
+        Callback = function()
+            loadstring(game:HttpGet("https://api.luarmor.net/files/v4/loaders/730854e5b6499ee91deb1080e8e12ae3.lua"))()
+        end
+    })
+    local GameButton2 = GameTab:CreateButton({
+        Name = "autofarm",
+        Description = nil,
+        Callback = function()
+            loadstring(game:HttpGet("https://raw.githubusercontent.com/BlitzIsKing/UniversalFarm/main/Loader/Regular"))()
+        end
+    })
+elseif gag2_id[game.PlaceId] then
+    local GameTab = Window:CreateTab({
+        Name = "grow a penis 2",
+        Icon = "star",
+        ImageSource = "Material",
+        ShowTitle = true
+    })
+    local GameButton1 = GameTab:CreateButton({
+        Name = "Quartyz",
+        Description = nil,
+        Callback = function()
+            loadstring(game:HttpGet("https://raw.githubusercontent.com/xQuartyx/QuartyzScript/main/Loader.lua"))()
+        end
+    })
+elseif unboxfactory_id[game.PlaceId] then
+    local GameTab = Window:CreateTab({
+        Name = "unbox a fucktory",
+        Icon = "star",
+        ImageSource = "Material",
+        ShowTitle = true
+    })
+    local GameButton1 = GameTab:CreateButton({
+        Name = "autocollect",
+        Description = nil,
+        Callback = function()
+            loadstring(game:HttpGet("https://raw.githubusercontent.com/Royynn/nhub/refs/heads/main/factory_auto_collect.lua"))()
+        end
+    })
+    local GameButton2 = GameTab:CreateButton({
+        Name = "autobuy Frostbound totem",
+        Description = nil,
+        Callback = function()
+            loadstring(game:HttpGet("https://raw.githubusercontent.com/Royynn/nhub/refs/heads/main/factory_auto_buy.lua"))()
+        end
+    })
+    local GameButton3 = GameTab:CreateButton({
+        Name = "delete popups nigga",
+        Description = nil,
+        Callback = function()
+            LocalPlayer.PlayerGui.EggCrateOpeningUI:Destroy()
+            LocalPlayer.PlayerGui.DontLeaveUI:Destroy()
+            LocalPlayer.PlayerGui.StageBundleOffer:Destroy()
+            LocalPlayer.PlayerGui.UpdateLog:Destroy()
+        end
+    })
+    local GameButton4 = GameTab:CreateToggle({
+        Name = "admin shop",
+        Description = nil,
+        CurrentValue = false,
+        Callback = function(Value)
+            LocalPlayer.PlayerGui.AdminShop.Enabled = Value
+        end
+    }, "Toggle")
+    local GameButton5 = GameTab:CreateToggle({
+        Name = "admin spin",
+        Description = nil,
+        CurrentValue = false,
+        Callback = function(Value)
+            LocalPlayer.PlayerGui.AdminAbuseSpinWheel.Enabled = Value
+        end
+    }, "Toggle")
+end
+--

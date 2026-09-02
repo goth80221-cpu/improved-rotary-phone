@@ -1,0 +1,3 @@
+Core: VerityRefreshed/Equilibrium.lua (active)
+Stable: Equilibrium_ASSISTANT_CORE_STABLE.lua
+9G -> ASSISTANT_CORE_STABLE 2310 lines regression gate

@@ -1,0 +1,3471 @@
+-- =====================================================================
+-- BASE :: SCHIZHUB BASE REWORK v1
+-- A from-scratch rebuild of the v7 hub. Data-driven engine, one
+-- component factory, modular feature registry, an event bus, and a
+-- live companion face (NOVA) that reacts to everything you do.
+--
+-- DESIGN RULES
+--   1. EVERYTHING IS DATA. Presets, options, features, face states are
+--      plain tables; behaviour is derived from them, never copy-pasted.
+--   2. ONE FACTORY. UI is built by UI.* builders that return handles.
+--      Styling flows from THEME + CONFIG, so restyling is global.
+--   3. FEATURES ARE MODULES. Each feature registers itself once (rows,
+--      commands, keybinds, run/stop); the registry renders it.
+--   4. EVENTS DECOUPLE. Systems publish to EVENTS; the face and the UI
+--      subscribe. Adding a reaction is one line, not a callback spiral.
+--   5. POSITIONS ARE DATA. Pages are built with a flow cursor + named
+--      slots, so reordering a page is editing a table, not editing px.
+--   6. STATE IS OBSERVABLE. Loops expose run/stop + status; the toggle
+--      watchdog is a generic guard, not a per-feature special case.
+-- =====================================================================
+-- BUILD VARIANT: single build; all visual flair derives from theme.
+local BUILD_VARIANT = "base"
+local Players = game:GetService("Players")
+local UserInputService = game:GetService("UserInputService")
+local PathfindingService = game:GetService("PathfindingService")
+local RunService = game:GetService("RunService")
+local TweenService = game:GetService("TweenService")
+local Lighting = game:GetService("Lighting")
+local LocalPlayer = Players.LocalPlayer
+
+-- =====================================================================
+-- SINGLE-INSTANCE GUARD
+-- =====================================================================
+for _, name in ipairs({ "PHHub", "PSE_Essentials", "PSE_Crosshair", "PSE_Boxes", "BASE_UI", "BASE_FACE" }) do
+    local old = game.CoreGui:FindFirstChild(name)
+    if old then old:Destroy() end
+end
+
+-- =====================================================================
+-- PART 1. CONFIG -- every tunable lives here
+-- =====================================================================
+local CONFIG = {
+    name = "BASE",
+    companion = "VERITY",
+    -- window
+    winW = 520, winH = 380,
+    winMinW = 260, winMinH = 180,
+    winPos = UDim2.new(0.5, -260, 0.3, 0),
+    titleH = 40,
+    tabH = 30,
+    -- flow rhythm (settings page etc.)
+    flowPad = 8,        -- pad before each section header
+    headerH = 18,       -- collapsible header height
+    headerPad = 6,      -- pad after a section header
+    rowH = 26,          -- default row height
+    rowGap = 4,
+    sectionGap = 6,     -- pad after a section's content
+    -- text
+    textMin = 8,
+    -- toast pool
+    toastMax = 3,
+    toastLifetime = 7.5,
+    toastH = 34,
+    -- face
+    faceW = 34, faceH = 32,   -- compact chip, fits inside the 40px title bar
+    faceBlinkMin = 2.4, faceBlinkMax = 5.5,  -- seconds between blinks
+    faceBlinkDuration = 0.14,
+    faceIdleShift = 0.08,                    -- per-state idle bob amplitude
+    -- animation
+    tweenDefault = 0.14,
+    tweenSnappy = 0.08,
+    tweenGlide = 0.28,
+    -- behaviour
+    followSpeed = 24,
+    chaseSpeed = 20,
+    teleportStyle = "instant",               -- "instant" | "tween"
+}
+
+-- Preset data (carried over from v7 for parity) -----------------------
+local THEME_PRESETS = {
+    {name = "Slate",     accent = Color3.fromRGB(120, 130, 150), accent2 = Color3.fromRGB(90, 100, 120), accent3 = Color3.fromRGB(180, 190, 205), bg = Color3.fromRGB(28, 30, 34),   text = Color3.fromRGB(225, 225, 230)},
+    {name = "Clown",     accent = Color3.fromRGB(250, 215, 70),  accent2 = Color3.fromRGB(150, 80, 220), accent3 = Color3.fromRGB(235, 190, 250), bg = Color3.fromRGB(32, 27, 42),   text = Color3.fromRGB(245, 238, 218)},
+    {name = "Joker",     accent = Color3.fromRGB(25, 95, 45),    accent2 = Color3.fromRGB(95, 35, 140),  accent3 = Color3.fromRGB(130, 190, 145), bg = Color3.fromRGB(18, 26, 20),   text = Color3.fromRGB(212, 226, 216)},
+    {name = "Jester",    accent = Color3.fromRGB(225, 65, 60),   accent2 = Color3.fromRGB(0, 145, 135),  accent3 = Color3.fromRGB(250, 205, 120), bg = Color3.fromRGB(30, 17, 20),   text = Color3.fromRGB(240, 230, 222)},
+    {name = "Arcade",    accent = Color3.fromRGB(0, 255, 0),     accent2 = Color3.fromRGB(255, 0, 255),  accent3 = Color3.fromRGB(0, 255, 255),  bg = Color3.fromRGB(35, 35, 35),   text = Color3.fromRGB(255, 255, 255)},
+    {name = "Cyber-arc", accent = Color3.fromRGB(0, 230, 255),   accent2 = Color3.fromRGB(255, 45, 220), accent3 = Color3.fromRGB(60, 255, 160),  bg = Color3.fromRGB(16, 20, 32),   text = Color3.fromRGB(228, 242, 255)},
+}
+
+local FONT_PRESETS = {
+    {name = "Gotham",      regular = Enum.Font.Gotham,     bold = Enum.Font.GothamBold},
+    {name = "Arial",       regular = Enum.Font.Arial,      bold = Enum.Font.ArialBold},
+    {name = "Source Sans", regular = Enum.Font.SourceSans, bold = Enum.Font.SourceSansBold},
+    {name = "Code",        regular = Enum.Font.Code,       bold = Enum.Font.Code},
+    {name = "Fantasy",     regular = Enum.Font.Fantasy,    bold = Enum.Font.Fantasy},
+    {name = "Arcade",      regular = Enum.Font.Arcade,     bold = Enum.Font.Arcade},
+}
+
+local SIZE_PRESETS = {
+    {name = "Compact", scale = 0.72, text = 0.92},
+    {name = "Small",   scale = 0.85, text = 0.96},
+    {name = "Medium",  scale = 1.00, text = 1.00},
+    {name = "Large",   scale = 1.18, text = 1.06},
+    {name = "X-Large", scale = 1.36, text = 1.12},
+}
+
+local TEXT_SCALE_PRESETS = {
+    {name = "Tiny",   factor = 0.82},
+    {name = "Small",  factor = 0.92},
+    {name = "Normal", factor = 1.00},
+    {name = "Large",  factor = 1.12},
+    {name = "X-Large",factor = 1.26},
+}
+
+local BORDER_EDGING_PRESETS = {
+    {name = "Thin",    thickness = 1, radius = 6},
+    {name = "Default", thickness = 2, radius = 10},
+    {name = "Bubble",  thickness = 3, radius = 16},
+    {name = "Capsule", thickness = 3, radius = 50},
+}
+
+local EDGING_FILTERS = {
+    {name = "Background", mode = "bg"},
+    {name = "Accent",     mode = "accent"},
+    {name = "Default",    mode = "default"},
+    {name = "Accent 2",   mode = "accent2"},
+}
+
+local IMPORTED_UI_PRESETS = {
+    -- IMPORTED_UI_PRESETS[1] = { ... } -- paste over this to make a look permanent
+}
+
+local SPEED_OPTIONS = {
+    {name = "Walk (16)", value = 16},
+    {name = "Jog (24)", value = 24},
+    {name = "Run (32)", value = 32},
+    {name = "Sprint (50)", value = 50},
+    {name = "Extreme (100)", value = 100},
+}
+
+local DIFFICULTY_OPTIONS = {
+    {name = "Easy",       speed = 14, fleeDistance = 25, recomputeTime = 2.0, jitter = 0,  triggerMult = 0.55, stopMult = 1.5, minTrigger = 15, minStop = 28},
+    {name = "Medium",     speed = 20, fleeDistance = 35, recomputeTime = 1.2, jitter = 10, triggerMult = 0.55, stopMult = 1.5, minTrigger = 15, minStop = 28},
+    {name = "Hard",       speed = 22, fleeDistance = 45, recomputeTime = 0.6, jitter = 20, triggerMult = 0.55, stopMult = 1.5, minTrigger = 15, minStop = 28},
+    {name = "Impossible", speed = 38, fleeDistance = 55, recomputeTime = 0.3, jitter = 35, triggerMult = 0.55, stopMult = 1.5, minTrigger = 15, minStop = 28},
+}
+
+-- Face customization defaults (Verity - see PART 6)
+local FACE_DEFAULTS = {
+    shape = "round",          -- round | narrow | wide | sharp
+    size = 1.0,
+    pupil = "dot",            -- dot | slit | star
+    blinkStyle = "natural",   -- natural | quick | slow | heavy
+    color = Color3.fromRGB(16, 16, 16),
+    pupilColor = Color3.fromRGB(255, 255, 255),
+    expression = "neutral",   -- neutral | focused | curious | amused | annoyed | alert | glitch
+    reactsTo = true,          -- react to user actions
+    follows = true,           -- eyes follow the cursor (screen-space)
+    animations = true,        -- idle bob + pop transitions
+    hair = false,             -- hair off by default, toggleable
+}
+local VERITY_DEFAULTS = FACE_DEFAULTS
+
+-- =====================================================================
+-- PART 2. UTIL -- small, pure helpers
+-- =====================================================================
+local UTIL = {}
+
+function UTIL.round(n) return math.floor(n + 0.5) end
+
+function UTIL.clamp(n, lo, hi) return math.max(lo, math.min(hi, n)) end
+
+function UTIL.lerp(a, b, t) return a + (b - a) * t end
+
+function UTIL.mixColor(a, b, t)
+    return Color3.fromRGB(
+        UTIL.round(UTIL.lerp(a.R * 255, b.R * 255, t)),
+        UTIL.round(UTIL.lerp(a.G * 255, b.G * 255, t)),
+        UTIL.round(UTIL.lerp(a.B * 255, b.B * 255, t))
+    )
+end
+
+-- Brighten or darken a colour by an amount in -1..1.
+function UTIL.shade(c, amt)
+    local f = 1 + amt
+    return Color3.fromRGB(
+        UTIL.clamp(UTIL.round(c.R * 255 * f), 0, 255),
+        UTIL.clamp(UTIL.round(c.G * 255 * f), 0, 255),
+        UTIL.clamp(UTIL.round(c.B * 255 * f), 0, 255)
+    )
+end
+
+-- Split a string on a delimiter. `plain` treats the delimiter as a
+-- literal string (no pattern magic), which is what command chaining
+-- needs for "\" and other magic characters.
+function UTIL.split(s, delim, plain)
+    if type(s) ~= "string" then return {} end
+    if delim == "" or delim == nil then return { s } end
+    local out = {}
+    local dl = #delim
+    local i = 1
+    while true do
+        local j = s:find(delim, i, plain)
+        if not j then
+            out[#out + 1] = s:sub(i)
+            break
+        end
+        out[#out + 1] = s:sub(i, j - 1)
+        i = j + dl
+    end
+    return out
+end
+
+-- Cheap stable hash for tagging generated names.
+function UTIL.hash(s)
+    local h = 5381
+    for i = 1, #s do
+        h = (h * 33 + s:byte(i)) % 0xFFFFFFFF
+    end
+    return h
+end
+
+-- Nearest player by a provided distance function; returns the best or nil.
+function UTIL.nearest(players, distFn)
+    local best, bestD = nil, math.huge
+    for _, p in ipairs(players) do
+        local d = distFn(p)
+        if d < bestD then best, bestD = p, d end
+    end
+    return best
+end
+
+-- A tiny but sufficient pub/sub bus. Events are fire-and-forget;
+-- handlers run synchronously in fire order.
+local EVENTS = { _handlers = {} }
+function EVENTS.on(event, fn)
+    EVENTS._handlers[event] = EVENTS._handlers[event] or {}
+    table.insert(EVENTS._handlers[event], fn)
+    return function()
+        local list = EVENTS._handlers[event]
+        if list then
+            for i, h in ipairs(list) do
+                if h == fn then table.remove(list, i) break end
+            end
+        end
+    end
+end
+function EVENTS.fire(event, ...)
+    local list = EVENTS._handlers[event]
+    if list then
+        local copy = table.clone(list)
+        for _, fn in ipairs(copy) do
+            pcall(fn, ...)
+        end
+    end
+end
+
+-- =====================================================================
+-- PART 3. THEME -- colour roles + live recolor
+-- =====================================================================
+local COLOR = {}
+local currentThemePreset = THEME_PRESETS[1]
+local currentFontPreset = FONT_PRESETS[1]
+local currentSizePreset = SIZE_PRESETS[3]
+local currentTextPreset = TEXT_SCALE_PRESETS[3]
+local currentBorderPreset = BORDER_EDGING_PRESETS[2]
+local currentEdgingFilter = EDGING_FILTERS[2]
+
+local function edgingFilterColor(filter)
+    if not filter then return COLOR.border end
+    if filter.mode == "bg" then return COLOR.bg end
+    if filter.mode == "accent" then return COLOR.accent end
+    if filter.mode == "accent2" then return COLOR.accent2 end
+    return COLOR.border
+end
+
+local function buildColorTable(preset)
+    local acc = preset.accent
+    local acc2 = preset.accent2
+    local acc3 = preset.accent3
+    local bg = preset.bg or Color3.fromRGB(24, 24, 27)
+    local text = preset.text or Color3.fromRGB(230, 230, 230)
+    return {
+        bg = bg,
+        panel = UTIL.shade(bg, 0.22),
+        titleBar = UTIL.shade(bg, 0.08),
+        border = edgingFilterColor(currentEdgingFilter),
+        text = text,
+        textDim = UTIL.mixColor(text, bg, 0.45),
+        warn = Color3.fromRGB(235, 100, 100),
+        on = Color3.fromRGB(95, 220, 130),
+        off = UTIL.shade(text, -0.45),
+        playerBtn = UTIL.shade(bg, 0.45),
+        switchOff = UTIL.shade(bg, 0.55),
+        accent = acc,
+        accent2 = acc2,
+        accent3 = acc3,
+        accentLight = UTIL.shade(acc, 0.35),
+        accentDark = UTIL.shade(acc, -0.35),
+        accent2Light = UTIL.shade(acc2, 0.35),
+        accent2Dark = UTIL.shade(acc2, -0.35),
+        accent3Light = UTIL.shade(acc3, 0.35),
+        accent3Dark = UTIL.shade(acc3, -0.35),
+    }
+end
+
+local themedNodes = {}
+local refreshTheme -- forward-declared: applyTheme runs before its definition
+local hubUIScale -- created by PART 7 (shell); declared here so appliers can use it
+local function applyTheme(preset)
+    currentThemePreset = preset
+    for k, v in pairs(buildColorTable(preset)) do
+        COLOR[k] = v
+    end
+    refreshTheme()
+end
+
+local themedFonts = {}
+local function bindFont(instance, weight)
+    table.insert(themedFonts, { instance = instance, base = instance.TextSize or 12 })
+    instance.Font = (weight == "bold" or weight == "regular") and (weight == "bold" and currentFontPreset.bold or currentFontPreset.regular) or currentFontPreset.regular
+end
+
+local function applyTextScale(factor)
+    for _, e in ipairs(themedFonts) do
+        if e.instance and e.instance.Parent then
+            e.instance.TextSize = math.max(CONFIG.textMin, math.floor((e.base or 12) * factor))
+        end
+    end
+end
+
+local function applySize(preset)
+    currentSizePreset = preset
+    local scale = TweenService:Create(hubUIScale, TweenInfo.new(0.15), { Scale = preset.scale })
+    scale:Play()
+    applyTextScale((preset.text or 1) * (currentTextPreset.factor or 1))
+end
+
+local function applyFont(preset)
+    currentFontPreset = preset
+    for _, e in ipairs(themedFonts) do
+        if e.instance and e.instance.Parent then
+            e.instance.Font = preset.regular
+        end
+    end
+end
+
+local function applyTextPreset(preset)
+    currentTextPreset = preset
+    applyTextScale((currentSizePreset.text or 1) * preset.factor)
+end
+
+local function applyBorderStyle(preset)
+    currentBorderPreset = preset
+    if HUB and HUB.frame then
+        HUB.frame.BorderSizePixel = preset.thickness
+        local corner = HUB.frame:FindFirstChildOfClass("UICorner")
+        if corner then corner.CornerRadius = UDim.new(0, preset.radius) end
+    end
+end
+
+local function applyEdgingFilter(filter)
+    currentEdgingFilter = filter
+    COLOR.border = edgingFilterColor(filter)
+    refreshTheme()
+    EVENTS.fire("edgingChanged", filter)
+end
+
+-- Recolour every live UI node that opted into theming. Nodes register
+-- themselves under UI.themed[] with {obj, key(s), color-ref}; recolour is a
+-- pure sweep, so any node added later can be re-painted at any time.
+refreshTheme = function()
+    for _, node in ipairs(themedNodes) do
+        local obj = node.obj
+        if obj and obj.Parent then
+            for _, spec in ipairs(node.specs) do
+                if spec.role then
+                    local c = COLOR[spec.role]
+                    if c then obj[spec.prop or "BackgroundColor3"] = c end
+                elseif spec.color then
+                    obj[spec.prop or "BackgroundColor3"] = spec.color
+                end
+            end
+        end
+    end
+end
+
+-- =====================================================================
+-- PART 4. STORE -- shared state (exposed as HUB for harness + legacy)
+-- =====================================================================
+local HUB = {
+    sectionHeaders = {},
+    contentBottom = {},
+    pages = {},
+    views = {},
+    buttons = {},
+    labels = {},
+    rows = {},
+    toggleSets = {},   -- id -> { set, get } for command-to-toggle sync
+    config = CONFIG,
+    externalUI = {},
+    notifyHistory = {},
+    winW = CONFIG.winW,
+    winH = CONFIG.winH,
+}
+
+HUB.currentTheme = currentThemePreset
+HUB.currentTextPreset = currentTextPreset
+HUB.TEXT_SCALE_PRESETS = TEXT_SCALE_PRESETS
+
+-- Theme/format appliers are chunk-locals; export them for the settings
+-- page (PART 10) and the command engine (PART 11).
+HUB.applyTheme = function(preset)
+    applyTheme(preset)
+    HUB.currentTheme = currentThemePreset
+    HUB.currentFontPreset = currentFontPreset
+    HUB.currentSizePreset = currentSizePreset
+    HUB.currentBorderPreset = currentBorderPreset
+HUB.currentEdgingFilter = currentEdgingFilter
+print("[BASE] part1 ok")
+end
+HUB.applySize = applySize
+HUB.applyTextPreset = applyTextPreset
+HUB.applyFont = applyFont
+HUB.applyBorderStyle = applyBorderStyle
+HUB.applyEdgingFilter = applyEdgingFilter
+HUB.PRESETS = {
+    themes = THEME_PRESETS,
+    fonts = FONT_PRESETS,
+    sizes = SIZE_PRESETS,
+    textScales = TEXT_SCALE_PRESETS,
+    borders = BORDER_EDGING_PRESETS,
+    filters = EDGING_FILTERS,
+    imported = IMPORTED_UI_PRESETS,
+}
+HUB.CONFIG = CONFIG
+HUB.EVENTS = EVENTS
+
+-- UI is built by PART 5..10 before the boot theme runs, so the COLOR
+-- table must be live from the start. Apply the default theme now.
+applyTheme(THEME_PRESETS[1])
+HUB.currentTheme = currentThemePreset
+HUB.currentFontPreset = currentFontPreset
+HUB.currentSizePreset = currentSizePreset
+HUB.currentBorderPreset = currentBorderPreset
+HUB.currentEdgingFilter = currentEdgingFilter
+
+-- Feature / loop registry (the whole UI + commands render from this)
+HUB.features = {}
+local FEATURES = HUB.features
+-- =====================================================================
+-- PART 5. UI -- the single component factory
+-- Every visual is built through here. Builders return a handle object
+-- (or a plain list) so callers never reach into instances. Styling
+-- always flows from COLOR / CONFIG; adding a themed node is one call.
+-- =====================================================================
+local UI = {}
+
+local function newInstance(className, props)
+    local obj = Instance.new(className)
+    if props then
+        for k, v in pairs(props) do obj[k] = v end
+    end
+    return obj
+end
+
+-- Register a node for live recolour. specs: { {role="accent", prop="BackgroundColor3"}, ... }
+function UI.theme(obj, specs)
+    table.insert(themedNodes, { obj = obj, specs = specs })
+    return obj
+end
+
+function UI.round(obj, radius)
+    local corner = newInstance("UICorner", { CornerRadius = UDim.new(0, radius or 8) })
+    corner.Parent = obj
+    return corner
+end
+
+function UI.stroke(obj, color, thickness)
+    local edge = newInstance("UIStroke", { Color = color or COLOR.border, Thickness = thickness or 1 })
+    edge.Parent = obj
+    return edge
+end
+
+function UI.frame(opts)
+    local f = newInstance("Frame", {
+        Name = opts.name or "Frame",
+        Size = opts.size or UDim2.new(0, 100, 0, 20),
+        Position = opts.position or UDim2.new(0, 0, 0, 0),
+        BackgroundColor3 = opts.color or COLOR.panel,
+        BackgroundTransparency = opts.transparency or 0,
+        BorderSizePixel = opts.border or 0,
+        ZIndex = opts.z or 1,
+        Visible = opts.visible == nil and true or opts.visible,
+        Parent = opts.parent,
+    })
+    if opts.radius then UI.round(f, opts.radius) end
+    if opts.stroke then UI.stroke(f, opts.stroke, opts.strokeThickness or 1) end
+    return f
+end
+
+function UI.label(opts)
+    local l = newInstance("TextLabel", {
+        Name = opts.name or "Label",
+        Size = opts.size or UDim2.new(0, 100, 0, 18),
+        Position = opts.position or UDim2.new(0, 0, 0, 0),
+        BackgroundTransparency = 1,
+        Text = opts.text or "",
+        TextColor3 = opts.color or COLOR.text,
+        Font = currentFontPreset.regular,
+        TextSize = opts.textSize or 12,
+        TextXAlignment = opts.x or Enum.TextXAlignment.Center,
+        TextYAlignment = opts.y or Enum.TextYAlignment.Center,
+        TextWrapped = opts.wrap or false,
+        ZIndex = opts.z or 1,
+        Visible = opts.visible == nil and true or opts.visible,
+        Parent = opts.parent,
+    })
+    bindFont(l, opts.weight)
+    if opts.colorRole then UI.theme(l, { { role = opts.colorRole, prop = "TextColor3" } }) end
+    return l
+end
+
+function UI.button(opts)
+    local b = newInstance("TextButton", {
+        Name = opts.name or "Button",
+        Size = opts.size or UDim2.new(0, 120, 0, 26),
+        Position = opts.position or UDim2.new(0, 0, 0, 0),
+        BackgroundColor3 = opts.color or COLOR.panel,
+        BackgroundTransparency = opts.transparency or 0,
+        Text = opts.text or "",
+        TextColor3 = opts.textColor or COLOR.text,
+        Font = currentFontPreset.bold,
+        TextSize = opts.textSize or 12,
+        AutoButtonColor = false,
+        ZIndex = opts.z or 2,
+        Visible = opts.visible == nil and true or opts.visible,
+        Parent = opts.parent,
+    })
+    bindFont(b, "bold")
+    if opts.radius then UI.round(b, opts.radius) end
+    if opts.stroke then UI.stroke(b, opts.stroke, opts.strokeThickness or 1) end
+    if opts.colorRole then UI.theme(b, { { role = opts.colorRole, prop = "BackgroundColor3" } }) end
+    if opts.onClick then b.MouseButton1Click:Connect(function() pcall(opts.onClick) end) end
+    if opts.hover ~= false then
+        local base = b.BackgroundColor3
+        local glow = opts.hoverColor or UTIL.shade(base, 0.18)
+        b.MouseEnter:Connect(function()
+            if b.Visible then
+                b.BackgroundColor3 = glow
+                if opts.hoverText then b.TextColor3 = opts.hoverText end
+            end
+        end)
+        b.MouseLeave:Connect(function()
+            if b.Visible then
+                b.BackgroundColor3 = base
+                if opts.hoverText then b.TextColor3 = opts.textColor or COLOR.text end
+            end
+        end)
+    end
+    return b
+end
+
+-- A labelled toggle row. Returns { row, statusLabel, set, get, onChange }.
+-- The "set" function is a guarded setter: it updates state, the label,
+-- and fires EVENTS.toggle (which the face + watchdog listen to).
+function UI.toggleRow(opts)
+    local row = UI.frame({
+        name = opts.name or "ToggleRow",
+        size = UDim2.new(1, -10, 0, opts.height or CONFIG.rowH),
+        position = UDim2.new(0, 5, 0, opts.y or 0),
+        color = COLOR.bg,
+        transparency = 0,
+        parent = opts.parent,
+        z = opts.z or 2,
+    })
+    local label = UI.label({
+        text = opts.text or "Toggle",
+        size = UDim2.new(1, -86, 1, 0),
+        position = UDim2.new(0, 10, 0, 0),
+        x = Enum.TextXAlignment.Left,
+        color = COLOR.text,
+        textSize = opts.textSize or 12,
+        weight = opts.weight or "regular",
+        parent = row,
+        colorRole = nil,
+    })
+    -- A real switch: track + sliding knob. State is obvious at a glance.
+    local track = UI.frame({
+        name = "Switch",
+        size = UDim2.new(0, 34, 0, 14),
+        position = UDim2.new(1, -46, 0.5, -7),
+        color = COLOR.switchOff,
+        radius = 7,
+        parent = row,
+        z = 3,
+    })
+    local knob = UI.frame({
+        name = "Knob",
+        size = UDim2.new(0, 12, 0, 12),
+        position = UDim2.new(0, 1, 0.5, -6),
+        color = COLOR.text,
+        radius = 6,
+        parent = track,
+        z = 4,
+    })
+    local state = opts.default or false
+    local cb = opts.onChange
+    local function set(v, silent)
+        v = v == nil and (not state) or v
+        state = v
+        track.BackgroundColor3 = state and COLOR.on or COLOR.switchOff
+        knob.Position = UDim2.new(state and 1 or 0, state and -13 or 1, 0.5, -6)
+        row.BackgroundColor3 = state and UTIL.shade(COLOR.accent, -0.65) or COLOR.bg
+        if cb and not silent then pcall(cb, state) end
+        EVENTS.fire("toggle", { id = opts.id, on = state, label = opts.text })
+    end
+    local btn = UI.button({
+        text = "",
+        size = UDim2.new(1, 0, 1, 0),
+        position = UDim2.new(0, 0, 0, 0),
+        color = Color3.new(1, 1, 1),
+        transparency = 1,
+        parent = row,
+        onClick = function() set() end,
+    })
+    if opts.id and HUB.toggleSets then
+        HUB.toggleSets[opts.id] = { set = set, get = function() return state end }
+    end
+    return row, track, set, function() return state end, function(fn) cb = fn end
+end
+
+-- A pill button (used in quick-action bars and preset grids).
+function UI.pill(opts)
+    return UI.button({
+        name = opts.name or "Pill",
+        text = opts.text or "",
+        size = opts.size or UDim2.new(0, 84, 0, CONFIG.rowH),
+        position = opts.position or UDim2.new(0, 0, 0, 0),
+        color = opts.color or COLOR.playerBtn,
+        textColor = opts.textColor or COLOR.text,
+        textSize = opts.textSize or 11,
+        radius = 6,
+        stroke = opts.stroke or COLOR.border,
+        strokeThickness = 1,
+        parent = opts.parent,
+        onClick = opts.onClick,
+        colorRole = opts.colorRole,
+        z = opts.z or 2,
+    })
+end
+
+-- A horizontal slider returning { bar, set, get }.
+function UI.slider(opts)
+    local row = UI.frame({
+        size = opts.size or UDim2.new(0, 140, 0, 20),
+        position = opts.position or UDim2.new(0, 0, 0, 0),
+        color = COLOR.bg,
+        parent = opts.parent,
+        z = opts.z or 2,
+    })
+    local track = UI.frame({
+        size = UDim2.new(1, 0, 0, 4),
+        position = UDim2.new(0, 0, 0.5, -2),
+        color = COLOR.switchOff,
+        radius = 2,
+        parent = row,
+    })
+    local fill = UI.frame({
+        size = UDim2.new(0, 0, 1, 0),
+        position = UDim2.new(0, 0, 0, 0),
+        color = COLOR.accent,
+        radius = 2,
+        parent = track,
+    })
+    UI.theme(fill, { { role = "accent", prop = "BackgroundColor3" } })
+    local knob = UI.frame({
+        size = UDim2.new(0, 14, 0, 14),
+        position = UDim2.new(0, -7, 0.5, -7),
+        color = COLOR.text,
+        radius = 7,
+        parent = row,
+        z = 3,
+    })
+    local value = opts.default or opts.min or 0
+    local min, max = opts.min or 0, opts.max or 100
+    local onChange = opts.onChange
+    local function set(v, silent)
+        value = UTIL.clamp(v, min, max)
+        local t = (value - min) / (max - min)
+        fill.Size = UDim2.new(t, 0, 1, 0)
+        knob.Position = UDim2.new(t, -7, 0.5, -7)
+        if onChange and not silent then pcall(onChange, value) end
+    end
+    -- Drag support (uses only Frame-valid events)
+    local dragging = false
+    local function updateFromX(x)
+        local abs = row.AbsolutePosition
+        local w = row.AbsoluteSize.X
+        set(min + (x - abs.X) / math.max(w, 1) * (max - min))
+    end
+    row.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 then
+            dragging = true
+            updateFromX(input.Position.X)
+        end
+    end)
+    row.InputEnded:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 then
+            dragging = false
+        end
+    end)
+    UserInputService.InputChanged:Connect(function(input)
+        if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then
+            updateFromX(input.Position.X)
+        end
+    end)
+    if opts.absoluteX then set(value, true) end
+    return row, set, function() return value end
+end
+
+-- A dropdown/picker button that opens a small menu of options.
+function UI.dropdown(opts)
+    local btn = UI.button({
+        text = opts.text or opts.label or "",
+        size = opts.size or UDim2.new(1, -10, 0, CONFIG.rowH),
+        position = opts.position or UDim2.new(0, 5, 0, opts.y or 0),
+        color = opts.color or COLOR.playerBtn,
+        textSize = opts.textSize or 11,
+        radius = 6,
+        stroke = COLOR.border,
+        strokeThickness = 1,
+        parent = opts.parent,
+        onClick = function() end,
+    })
+    local open = false
+    local menu
+    local select = opts.onChange
+    local function close()
+        open = false
+        if menu then menu.Visible = false end
+    end
+    local function openMenu()
+        if open then close() return end
+        open = true
+        if not menu then
+            menu = UI.frame({
+                size = UDim2.new(1, -10, 0, #opts.options * 24 + 6),
+                position = UDim2.new(0, 5, 0, 0),
+                color = COLOR.titleBar,
+                radius = 6,
+                stroke = COLOR.border,
+                strokeThickness = 1,
+                parent = btn.Parent,
+                z = 40,
+                visible = false,
+            })
+            for i, opt in ipairs(opts.options) do
+                UI.button({
+                    text = opt.name,
+                    size = UDim2.new(1, -8, 0, 22),
+                    position = UDim2.new(0, 4, 0, (i - 1) * 24 + 3),
+                    color = COLOR.panel,
+                    textSize = 11,
+                    radius = 4,
+                    parent = menu,
+                    onClick = function()
+                        select(opt)
+                        btn.Text = opts.labelPrefix or "" .. opt.name
+                        close()
+                        EVENTS.fire("choice", { id = opts.id, option = opt, label = opt.name })
+                    end,
+                })
+            end
+        end
+        local abs = btn.AbsolutePosition
+        local absY = abs.Y + btn.AbsoluteSize.Y + 4
+        menu.Position = UDim2.new(0, btn.AbsolutePosition.X - btn.Parent.AbsolutePosition.X, 0, absY - btn.Parent.AbsolutePosition.Y)
+        menu.Visible = true
+        menu.ZIndex = 40
+    end
+    btn.MouseButton1Click:Connect(openMenu)
+    return btn, close, function() return opts.options[1] end
+end
+
+-- =====================================================================
+-- PART 5b. COLLAPSIBLE SECTIONS
+-- The RED 101 contract is preserved exactly: every section snapshots its
+-- content ONCE from the final un-shifted layout (HUB.finalizeCollapsibles
+-- at end of script). items/off/contentH are constants after that, so any
+-- collapse/expand order can never spill content into a neighbour.
+-- =====================================================================
+local function nextSectionEntry(parent, entry)
+    local best, bestCur = nil, math.huge
+    for _, e in ipairs(HUB.sectionHeaders) do
+        if e.parent == parent and e.curY and e.curY > entry.curY and e.curY < bestCur then
+            best, bestCur = e, e.curY
+        end
+    end
+    return best
+end
+
+function UI.section(opts)
+    local parent = opts.parent
+    local y = opts.y
+    local shiftParent = opts.shiftParent or parent
+    local row = UI.frame({
+        name = opts.name or ("Section_" .. opts.text),
+        size = UDim2.new(1, -10, 0, CONFIG.headerH),
+        position = UDim2.new(0, 5, 0, y),
+        color = COLOR.bg,
+        parent = parent,
+        z = opts.z or 2,
+    })
+    local tick = UI.frame({
+        size = UDim2.new(0, 3, 0, 12),
+        position = UDim2.new(0, 0, 0.5, -6),
+        color = COLOR.accent2,
+        radius = 1.5,
+        parent = row,
+        z = 3,
+    })
+    UI.theme(tick, { { role = "accent2", prop = "BackgroundColor3" } })
+    local label = UI.label({
+        text = opts.text or "",
+        size = UDim2.new(1, -24, 1, 0),
+        position = UDim2.new(0, 10, 0, 0),
+        x = Enum.TextXAlignment.Left,
+        color = COLOR.textDim,
+        textSize = opts.textSize or 11,
+        weight = "bold",
+        parent = row,
+    })
+    local chevron = UI.label({
+        text = "▾",
+        size = UDim2.new(0, 12, 1, 0),
+        position = UDim2.new(1, -16, 0, 0),
+        color = COLOR.textDim,
+        textSize = 10,
+        weight = "bold",
+        parent = row,
+    })
+    local click = UI.button({
+        text = "",
+        size = UDim2.new(1, 0, 1, 0),
+        position = UDim2.new(0, 0, 0, 0),
+        color = Color3.new(1, 1, 1),
+        transparency = 1,
+        parent = row,
+        hover = false,
+    })
+    local entry = {
+        parent = parent, y = y, curY = y,
+        collapsed = false, contentH = nil, items = nil, finalized = false,
+    }
+    local function finalizeSection()
+        if entry.finalized then return end
+        entry.finalized = true
+        local nextE = nextSectionEntry(parent, entry)
+        local bottom = nextE and nextE.curY or (HUB.contentBottom[parent] or (entry.curY + 20))
+        entry.contentH = math.max(0, bottom - entry.curY - CONFIG.headerH)
+        entry.items = {}
+        for _, child in ipairs(parent:GetChildren()) do
+            if child ~= row then
+                local py = child.Position and child.Position.Y
+                local cy = py and py.Offset
+                if cy and cy > entry.curY and cy < bottom then
+                    entry.items[#entry.items + 1] = { obj = child, off = cy - entry.curY }
+                end
+            end
+        end
+    end
+    entry.finalize = finalizeSection
+    local function shiftBelow(delta, fromY)
+        if delta == 0 then return end
+        fromY = fromY or (entry.curY + CONFIG.headerH)
+        for _, child in ipairs(shiftParent:GetChildren()) do
+            if child ~= row and child.Visible ~= false and child.Position then
+                local py = child.Position.Y
+                local cy = py and py.Offset
+                if cy and cy >= fromY then
+                    child.Position = UDim2.new(child.Position.X.Scale, child.Position.X.Offset, child.Position.Y.Scale, cy + delta)
+                end
+            end
+        end
+        for _, e in ipairs(HUB.sectionHeaders) do
+            if (e.parent == shiftParent or e.parent == parent) and e.curY and e.curY >= fromY then
+                e.curY = e.curY + delta
+            end
+        end
+    end
+    local function toggle()
+        entry.collapsed = not entry.collapsed
+        label.TextColor3 = entry.collapsed and COLOR.off or COLOR.textDim
+        tick.Visible = not entry.collapsed
+        chevron.Text = entry.collapsed and "▸" or "▾"
+        chevron.TextColor3 = entry.collapsed and COLOR.off or COLOR.textDim
+        local nextE = nextSectionEntry(parent, entry)
+        local nextCurY = nextE and nextE.curY or (HUB.contentBottom[parent] or (entry.curY + 20))
+        finalizeSection()
+        local contentH = entry.contentH
+        local items = entry.items
+        if entry.collapsed then
+            for _, it in ipairs(items) do
+                pcall(function() it.obj.Visible = false end)
+            end
+            shiftBelow(-contentH, nextCurY)
+        else
+            shiftBelow(contentH, nextCurY)
+            for _, it in ipairs(items) do
+                pcall(function()
+                    it.obj.Position = UDim2.new(it.obj.Position.X.Scale, it.obj.Position.X.Offset, it.obj.Position.Y.Scale, entry.curY + it.off)
+                    it.obj.Visible = true
+                end)
+            end
+        end
+        if HUB.refreshCanvas then HUB.refreshCanvas(shiftParent) end
+        if HUB.fitExtrasWindow then HUB.fitExtrasWindow(shiftParent) end
+        EVENTS.fire("section", { id = opts.id, text = opts.text, collapsed = entry.collapsed })
+    end
+    entry.toggle = toggle
+    click.MouseButton1Click:Connect(toggle)
+    click.MouseEnter:Connect(function()
+        label.TextColor3 = COLOR.text
+        chevron.TextColor3 = COLOR.text
+    end)
+    click.MouseLeave:Connect(function()
+        if not entry.collapsed then
+            label.TextColor3 = COLOR.textDim
+            chevron.TextColor3 = COLOR.textDim
+        end
+    end)
+    table.insert(HUB.sectionHeaders, entry)
+    return row, label
+end
+
+-- Fixed-page section header (non-collapsible, plain tick + centered label).
+function UI.sectionPlain(opts)
+    local row = UI.frame({
+        name = opts.name or ("Header_" .. opts.text),
+        size = UDim2.new(1, -10, 0, 16),
+        position = UDim2.new(0, 5, 0, opts.y or 0),
+        color = COLOR.bg,
+        parent = opts.parent,
+    })
+    local tick = UI.frame({
+        size = UDim2.new(0, 3, 0, 10),
+        position = UDim2.new(0, 0, 0.5, -5),
+        color = COLOR.accent2,
+        radius = 1.5,
+        parent = row,
+    })
+    UI.theme(tick, { { role = "accent2", prop = "BackgroundColor3" } })
+    local label = UI.label({
+        text = opts.text or "",
+        size = UDim2.new(1, 0, 1, 0),
+        color = COLOR.textDim,
+        textSize = 10,
+        weight = "bold",
+        parent = row,
+    })
+    return row, label
+end
+
+-- =====================================================================
+-- PART 5c. TOASTS (pooled, incremental resize, themed)
+-- =====================================================================
+local toastPool = {}
+local toastOrder = {}
+local function toastClose(f)
+    f.Visible = false
+    if HUB.fitExtrasWindow and HUB.currentPage == "extras" then HUB.fitExtrasWindow(HUB.pages.extras) end
+end
+local function ensureToastPool(n)
+    while #toastPool < n do
+        local t = UI.frame({
+            name = "Toast",
+            size = UDim2.new(0, 0, 0, CONFIG.toastH),
+            position = UDim2.new(0, 0, 0, 0),
+            color = COLOR.titleBar,
+            radius = 8,
+            stroke = COLOR.border,
+            strokeThickness = 1,
+            parent = HUB.notifyLayer,
+            visible = false,
+            z = 60,
+        })
+        UI.label({
+            text = "",
+            size = UDim2.new(1, -12, 1, 0),
+            position = UDim2.new(0, 6, 0, 0),
+            x = Enum.TextXAlignment.Left,
+            color = COLOR.text,
+            textSize = 12,
+            parent = t,
+        })
+        table.insert(toastPool, t)
+    end
+    while #toastPool > n do
+        local t = table.remove(toastPool)
+        t:Destroy()
+    end
+end
+
+local function showToast(text, tone)
+    if HUB.useDrawing then
+        pcall(function()
+            local cam = workspace.CurrentCamera
+            local toast = Drawing.new("Text")
+            toast.Text = tostring(text)
+            toast.Size = 18
+            toast.Color = (tone=="on" or tone=="success") and Color3.fromRGB(80,255,120) or (tone=="warn" and Color3.fromRGB(255,200,80) or Color3.fromRGB(230,230,230))
+            toast.Position = V2New((cam and cam.ViewportSize.X/2 or 400), 38)
+            toast.Center = true
+            toast.Outline = true
+            toast.Visible = true
+            task.delay(CONFIG.toastLifetime, function() pcall(function() toast:Remove() end) end)
+        end)
+        pcall(function() print("[TOAST] "..tostring(text)) end)
+        pcall(function() EVENTS.fire("toast", { text=text, tone=tone }) end)
+        return
+    end
+    ensureToastPool(CONFIG.toastMax)
+    -- move older toasts up
+    for _, t in ipairs(toastPool) do
+        if t.Visible then
+            t.Position = UDim2.new(1, -t.AbsoluteSize.X - 14, 0, t.Position.Y.Offset - CONFIG.toastH - 6)
+        end
+    end
+    local t = nil
+    for _, cand in ipairs(toastPool) do
+        if not cand.Visible then t = cand break end
+    end
+    t = t or toastPool[#toastPool]
+    if not t then return end
+    local label = t:FindFirstChildOfClass("TextLabel")
+    if not label then return end
+    label.Text = text
+    local col = COLOR.textDim
+    if tone == "on" or tone == "success" then col = COLOR.on
+    elseif tone == "warn" or tone == "error" then col = COLOR.warn
+    elseif tone == "accent" then col = COLOR.accent
+    end
+    label.TextColor3 = col
+    t.BackgroundColor3 = col == COLOR.warn and UTIL.shade(COLOR.warn, -0.7) or COLOR.titleBar
+    t.Position = UDim2.new(1, -t.AbsoluteSize.X - 14, 0, t.Position.Y.Offset + 0)
+    t.Visible = true
+    t.ZIndex = 60
+    task.delay(CONFIG.toastLifetime, function() toastClose(t) end)
+    EVENTS.fire("toast", { text = text, tone = tone })
+end
+
+HUB.showToast = showToast
+print("[BASE] part2 ok")
+-- =====================================================================
+-- PART 6. VERITY -- the companion / 2D mascot
+-- Hybrid build: hub stays ScreenGui, Verity portrait is a modular 2D
+-- Frame stack (Drawing-like layers). Hair off by default, toggleable.
+-- Layers: Head -> Hair -> Eyes -> Eyebrows -> Mouth -> Effects
+-- States: neutral, focused, curious, amused, annoyed, alert, glitch
+-- Reference: yellow smiley (clean circle, intense eyes, simple smile,
+-- dark muted accents, crisp outlines, flat cel, glitch = per-layer shift)
+-- =====================================================================
+local VERITY = {}
+local FACE = VERITY -- alias so old code (HUB.face, FACE.set) keeps working
+HUB.verity = VERITY
+
+VERITY.opts = table.clone(VERITY_DEFAULTS or FACE_DEFAULTS)
+VERITY.state = "neutral"
+VERITY.lastEvent = { event = "", time = 0 }
+VERITY.hairOn = false
+
+local verityRoot, verityHead, verityHair, verityGlitchR, verityGlitchB
+local eyeL, eyeR, pupilL, pupilR, browL, browR, mouth
+
+local function tween(inst, props, time)
+    time = time or CONFIG.tweenDefault
+    local t = TweenService:Create(inst, TweenInfo.new(time, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), props)
+    t:Play()
+    return t
+end
+
+local SHAPES = {
+    round = { corner = 100, w = 9, h = 10 },
+    narrow = { corner = 100, w = 6, h = 11 },
+    wide = { corner = 100, w = 11, h = 7 },
+    sharp = { corner = 2, w = 7, h = 11 },
+}
+
+local function eyeGeometry(shapeKey, size)
+    local s = SHAPES[shapeKey] or SHAPES.round
+    return { w = s.w * (size or 1), h = s.h * (size or 1), corner = s.corner }
+end
+
+local function pupilSize(style, fw)
+    local s = fw / 34
+    if style == "dot" then return 3 * s, 3 * s
+    elseif style == "slit" then return 1.5 * s, 6 * s
+    elseif style == "star" then return 5 * s, 5 * s
+    end
+    return 2 * s, 3 * s
+end
+
+-- Verity palette: yellow head, black features, accent from theme
+local VERITY_HEAD = Color3.fromRGB(255, 220, 55)
+local VERITY_HEAD_DARK = Color3.fromRGB(235, 200, 40)
+local VERITY_FEATURE = Color3.fromRGB(16, 16, 16)
+local VERITY_ACCENT = Color3.fromRGB(90, 90, 255)
+
+function VERITY.apply()
+    if not verityHead then return end
+    local o = VERITY.opts
+    local fw, fh = CONFIG.faceW, CONFIG.faceH
+    local g = eyeGeometry(o.shape or "round", o.size)
+    local eyeW, eyeH = g.w, g.h
+    local sep = fw * 0.28
+    eyeL.Size = UDim2.new(0, eyeW, 0, eyeH)
+    eyeR.Size = UDim2.new(0, eyeW, 0, eyeH)
+    local corner = UDim.new(0, g.corner)
+    if eyeL:FindFirstChildOfClass("UICorner") then eyeL:FindFirstChildOfClass("UICorner").CornerRadius = corner end
+    if eyeR:FindFirstChildOfClass("UICorner") then eyeR:FindFirstChildOfClass("UICorner").CornerRadius = corner end
+    eyeL.Position = UDim2.new(0.5, -(sep + eyeW/2), 0.5, -eyeH/2 - 2)
+    eyeR.Position = UDim2.new(0.5, -eyeW/2 + sep, 0.5, -eyeH/2 - 2)
+    eyeL.BackgroundColor3 = o.color or VERITY_FEATURE
+    eyeR.BackgroundColor3 = o.color or VERITY_FEATURE
+    -- hair visibility follows VERITY.hairOn and opts.hair (off by default)
+    if verityHair then
+        local wantsHair = VERITY.hairOn and (o.hair ~= false)
+        verityHair.Visible = wantsHair and true or false
+    end
+    VERITY.setMouth(VERITY.state)
+end
+
+local MOUTH_GLYPH = {
+    neutral = "–", focused = "–", curious = "o", amused = "⌣", annoyed = "—", alert = "o", glitch = "⌣",
+    idle="–", happy="⌣", tired="–", sad="⌢", shocked="o", sleep="z", line="–", smile="⌣", frown="⌢",
+}
+
+function VERITY.setMouth(state)
+    if not mouth then return end
+    local g = MOUTH_GLYPH[state] or MOUTH_GLYPH.neutral
+    mouth.Text = g
+    -- mouth color stays black for smiley; tint for glitch
+    if state == "glitch" then
+        mouth.TextColor3 = VERITY_ACCENT
+    else
+        mouth.TextColor3 = VERITY_FEATURE
+    end
+end
+
+local function browForState(state, on)
+    if state == "focused" then return -3, -3
+    elseif state == "annoyed" then return -4, -4
+    elseif state == "curious" then return 3, -1
+    elseif state == "alert" then return 2, 2
+    elseif state == "amused" then return -1, -2
+    end
+    return 0, 0
+end
+
+local blinking = false
+local function doBlink()
+    if blinking or not verityHead then return end
+    if VERITY.state == "sleep" then return end
+    blinking = true
+    local dur = CONFIG.faceBlinkDuration
+    local style = VERITY.opts.blinkStyle
+    if style == "quick" then dur = 0.06 elseif style == "slow" then dur = 0.28 elseif style == "heavy" then dur = 0.4 end
+    local g = eyeGeometry(VERITY.opts.shape or "round", VERITY.opts.size)
+    tween(eyeL, { Size = UDim2.new(0, g.w, 0, 1) }, dur*0.4)
+    tween(eyeR, { Size = UDim2.new(0, g.w, 0, 1) }, dur*0.4)
+    task.delay(dur*0.4+0.02, function()
+        if not verityHead then return end
+        tween(eyeL, { Size = UDim2.new(0, g.w, 0, g.h) }, dur*0.6)
+        tween(eyeR, { Size = UDim2.new(0, g.w, 0, g.h) }, dur*0.6)
+        task.delay(dur*0.6, function() blinking = false end)
+    end)
+end
+
+local function scheduleBlink()
+    if not VERITY.opts.reactsTo then return end
+    local min, max = CONFIG.faceBlinkMin, CONFIG.faceBlinkMax
+    task.delay(min + math.random()*(max-min), function()
+        if verityHead and verityHead.Visible then doBlink(); scheduleBlink() end
+    end)
+end
+
+RunService.RenderStepped:Connect(function()
+    if not verityHead or not verityHead.Visible then return end
+    if VERITY.opts.animations then
+        local t = os.clock()
+        local bob = math.sin(t*2.2) * CONFIG.faceIdleShift * (VERITY.state=="amused" and 1.6 or 1)
+        if verityRoot then verityRoot.Position = UDim2.new(0, 6, 0, 4 + bob) end
+    end
+    if VERITY.opts.follows then
+        local cam = workspace.CurrentCamera
+        local mouse = UserInputService:GetMouseLocation()
+        if cam then
+            local abs = verityHead.AbsolutePosition
+            local dx = mouse.X - (abs.X + CONFIG.faceW/2)
+            local dy = mouse.Y - (abs.Y + CONFIG.faceH/2)
+            local cl = 2.5
+            local ox = UTIL.clamp(dx/50, -cl, cl)
+            local oy = UTIL.clamp(dy/50, -cl, cl)
+            if pupilL then pupilL.Position = UDim2.new(0.5, ox, 0.5, oy) end
+            if pupilR then pupilR.Position = UDim2.new(0.5, ox, 0.5, oy) end
+        end
+    end
+end)
+
+function VERITY.setHair(on)
+    VERITY.hairOn = on and true or false
+    if verityHair then verityHair.Visible = VERITY.hairOn end
+    if VERITY.opts then VERITY.opts.hair = VERITY.hairOn end
+end
+
+function VERITY.set(state, reason, opts)
+    local o = opts or {}
+    -- allow new Verity states plus legacy FACE states
+    local mapLegacy = { idle="neutral", happy="amused", tired="neutral", sad="annoyed", shocked="alert", sleep="neutral", focus="focused", party="amused" }
+    if mapLegacy[state] then state = mapLegacy[state] end
+    if VERITY.state == state and not o.force then return end
+    VERITY.state = state
+    -- mouth + brows
+    VERITY.setMouth(state)
+    local ly, ry = browForState(state, true)
+    if browL then browL.Position = UDim2.new(0, 1, 0, ly) end
+    if browR then browR.Position = UDim2.new(1, -11, 0, ry) end
+    -- eye shape per state
+    local shape = "round"
+    if state=="focused" then shape="narrow" elseif state=="alert" then shape="round" elseif state=="amused" then shape="wide" end
+    local g = eyeGeometry(shape, VERITY.opts.size)
+    if eyeL then tween(eyeL, { Size = UDim2.new(0, g.w, 0, g.h) }, 0.08) end
+    if eyeR then tween(eyeR, { Size = UDim2.new(0, g.w, 0, g.h) }, 0.08) end
+    -- head tilt for curious
+    if verityHead then
+        local rot = 0
+        if state=="curious" then rot = 5 elseif state=="amused" then rot = -3 end
+        verityHead.Rotation = rot
+    end
+    -- glitch layers only for corrupted
+    local isGlitch = state=="glitch"
+    if verityGlitchR then verityGlitchR.Visible = isGlitch end
+    if verityGlitchB then verityGlitchB.Visible = isGlitch end
+    if isGlitch and verityHead then
+        -- random per-layer jitter next frame
+        task.delay(0.06, function()
+            if VERITY.state~="glitch" then return end
+            if verityGlitchR then verityGlitchR.Position = UDim2.new(0, math.random(-2,2), 0, math.random(-1,1)) end
+            if verityGlitchB then verityGlitchB.Position = UDim2.new(0, math.random(-2,2), 0, math.random(-1,1)) end
+        end)
+    end
+    -- subtle pop
+    if VERITY.opts.animations and verityHead then
+        tween(verityHead, { Size = UDim2.new(0, CONFIG.faceW*1.04, 0, CONFIG.faceH*1.04) }, CONFIG.tweenSnappy)
+        task.delay(CONFIG.tweenSnappy, function()
+            if verityHead then tween(verityHead, { Size = UDim2.new(0, CONFIG.faceW, 0, CONFIG.faceH) }, CONFIG.tweenSnappy) end
+        end)
+    end
+    VERITY.lastEvent = { event = reason or "", time = os.clock() }
+end
+
+function VERITY.build(parent)
+    verityRoot = UI.frame({
+        name = "VERITY", size = UDim2.new(0, CONFIG.faceW+10, 0, CONFIG.faceH+6),
+        position = UDim2.new(0, 6, 0, 4), color = COLOR.titleBar, transparency = 1,
+        parent = parent, z = 5,
+    })
+    -- chromatic glitch ghosts (behind head)
+    verityGlitchR = UI.frame({
+        name="GlitchR", size = UDim2.new(0, CONFIG.faceW, 0, CONFIG.faceH),
+        position = UDim2.new(0, 2, 0, 0), color = Color3.fromRGB(255, 50, 80),
+        radius = 50, transparency = 0.65, parent = verityRoot, z = 1, visible = false,
+    })
+    verityGlitchB = UI.frame({
+        name="GlitchB", size = UDim2.new(0, CONFIG.faceW, 0, CONFIG.faceH),
+        position = UDim2.new(0, -2, 0, 0), color = Color3.fromRGB(50, 120, 255),
+        radius = 50, transparency = 0.65, parent = verityRoot, z = 1, visible = false,
+    })
+    verityHead = UI.frame({
+        name="Head", size = UDim2.new(0, CONFIG.faceW, 0, CONFIG.faceH),
+        position = UDim2.new(0, 5, 0, 3), color = VERITY_HEAD, radius = 50,
+        stroke = VERITY_FEATURE, strokeThickness = 1, parent = verityRoot, z = 2,
+    })
+    -- hair: stylized clumps, off by default
+    verityHair = UI.frame({
+        name="Hair", size = UDim2.new(1, 2, 0, 10), position = UDim2.new(0, -1, 0, -4),
+        color = Color3.fromRGB(24, 24, 28), radius = 6, parent = verityHead, z = 4, visible = false,
+    })
+    -- inner hair detail (two clumps)
+    UI.frame({ size = UDim2.new(0, 10, 0, 6), position = UDim2.new(0, 4, 0, 2), color = Color3.fromRGB(36,36,42), radius = 4, parent = verityHair, z = 5 })
+    UI.frame({ size = UDim2.new(0, 10, 0, 6), position = UDim2.new(1, -14, 0, 2), color = Color3.fromRGB(36,36,42), radius = 4, parent = verityHair, z = 5 })
+
+    eyeL = UI.frame({
+        name="EyeL", size = UDim2.new(0, 7, 0, 9), position = UDim2.new(0.5, -11, 0.5, -6),
+        color = VERITY_FEATURE, radius = 100, parent = verityHead, z = 3,
+    })
+    eyeR = UI.frame({
+        name="EyeR", size = UDim2.new(0, 7, 0, 9), position = UDim2.new(0.5, 4, 0.5, -6),
+        color = VERITY_FEATURE, radius = 100, parent = verityHead, z = 3,
+    })
+    -- pupils (subtle inner highlight)
+    pupilL = UI.frame({
+        name="PupilL", size = UDim2.new(0, 2, 0, 2), position = UDim2.new(0.5, -1, 0.5, -1),
+        color = Color3.fromRGB(255,255,255), radius = 2, parent = eyeL, z = 4, visible = false,
+    })
+    pupilR = UI.frame({
+        name="PupilR", size = UDim2.new(0, 2, 0, 2), position = UDim2.new(0.5, -1, 0.5, -1),
+        color = Color3.fromRGB(255,255,255), radius = 2, parent = eyeR, z = 4, visible = false,
+    })
+    browL = UI.frame({ name="BrowL", size = UDim2.new(0, 10, 0, 2), position = UDim2.new(0, 1, 0, 0), color = VERITY_FEATURE, radius = 1, parent = eyeL, z = 5 })
+    browR = UI.frame({ name="BrowR", size = UDim2.new(0, 10, 0, 2), position = UDim2.new(1, -11, 0, 0), color = VERITY_FEATURE, radius = 1, parent = eyeR, z = 5 })
+    -- eyebags (hidden, darken over session)
+    local bagL = UI.frame({ name="BagL", size = UDim2.new(0, 10, 0, 4), position = UDim2.new(0.5, -11, 0, 6), color = Color3.fromRGB(60, 40, 40), radius = 2, parent = verityHead, z = 3, visible = false, transparency = 0.7 })
+    local bagR = UI.frame({ name="BagR", size = UDim2.new(0, 10, 0, 4), position = UDim2.new(0.5, 4, 0, 6), color = Color3.fromRGB(60, 40, 40), radius = 2, parent = verityHead, z = 3, visible = false, transparency = 0.7 })
+    VERITY._bags = {bagL, bagR}
+    VERITY._sessionStart = os.clock()
+    VERITY._meanCount = 0
+    mouth = UI.label({
+        text = "⌣", size = UDim2.new(0, 18, 0, 10), position = UDim2.new(0.5, -9, 0.62, -5),
+        color = VERITY_FEATURE, textSize = 12, weight = "bold", parent = verityHead, z = 3,
+    })
+    VERITY.apply()
+    VERITY.set("neutral", "boot")
+    VERITY.setHair(false)
+    scheduleBlink()
+    return verityRoot
+end
+
+-- Reactions map to Verity states
+EVENTS.on("toggle", function(info) if not VERITY.opts.reactsTo then return end; if info.on then VERITY.set("focused","toggle") else VERITY.set("neutral","toggle") end end)
+EVENTS.on("teleport", function() if not VERITY.opts.reactsTo then return end; VERITY.set("alert","teleport") end)
+EVENTS.on("chase", function() if not VERITY.opts.reactsTo then return end; VERITY.set("focused","chase") end)
+EVENTS.on("kill", function() if not VERITY.opts.reactsTo then return end; VERITY.set("amused","kill") end)
+EVENTS.on("error", function() if not VERITY.opts.reactsTo then return end; VERITY.set("annoyed","error") end)
+EVENTS.on("command", function() if not VERITY.opts.reactsTo then return end; VERITY.set("curious","command") end)
+EVENTS.on("choice", function() if not VERITY.opts.reactsTo then return end; VERITY.set("amused","choice") end)
+EVENTS.on("section", function() if not VERITY.opts.reactsTo then return end; VERITY.set("curious","section") end)
+EVENTS.on("sleep", function() VERITY.set("neutral","sleep"); if verityHead then verityHead.BackgroundTransparency=0.3 end end)
+EVENTS.on("wake", function() VERITY.set("neutral","wake"); if verityHead then verityHead.BackgroundTransparency=0 end end)
+
+-- session eyebag + mean (hidden states)
+task.spawn(function()
+    while true do wait(60)
+        if VERITY._bags and VERITY._sessionStart then
+            local elapsed = os.clock() - VERITY._sessionStart
+            local alpha = math.clamp(elapsed/3600, 0, 0.55)
+            for _, bag in ipairs(VERITY._bags) do if bag then bag.Transparency = 1 - alpha*0.7; bag.Visible = alpha>0.05 end end
+        end
+    end
+end)
+do
+    local orig = showToast
+    if orig then
+        showToast = function(text, tone)
+            if typeof(text)=='string' and (text:lower():find("idiot") or text:lower():find("stupid") or text:lower():find("hate") or text:lower():find("dumb")) then
+                VERITY._meanCount = (VERITY._meanCount or 0) + 1
+                if VERITY._meanCount > 2 then
+                    VERITY.set("annoyed","mean")
+                    task.delay(2, function() if VERITY._meanCount>4 then VERITY.set("glitch","mean") end end)
+                end
+            end
+            return orig(text, tone)
+        end
+    end
+end
+
+HUB.face = VERITY
+HUB.verity = VERITY
+-- legacy alias for v7 compat
+_G.VERITY = VERITY
+print("[BASE] part3 ok")
+
+-- =====================================================================
+-- PART 7. SHELL -- Frame hub (always) + Verity Drawing assistant (if Drawing)
+-- =====================================================================
+local HAS_DRAWING = false
+pcall(function()
+    if Drawing and Drawing.new then
+        local s = Drawing.new("Square")
+        s:Remove()
+        HAS_DRAWING = true
+    end
+end)
+HUB.useDrawing = HAS_DRAWING
+HUB.VerityLocked = true
+
+-- Splash screen: Verity is Loading. with progress -------------------------
+local function RunSplash(onDone)
+    if not HAS_DRAWING then onDone(); return end
+    local cam = workspace.CurrentCamera
+    local V2New = Vector2.new
+    local center = V2New(cam.ViewportSize.X/2, cam.ViewportSize.Y/2)
+    local bg = Drawing.new("Square")
+    bg.Size = V2New(340, 120)
+    bg.Position = center - V2New(170, 60)
+    bg.Color = Color3.fromRGB(20,20,24)
+    bg.Filled = true
+    bg.Transparency = 1
+    bg.Visible = true
+    local border = Drawing.new("Square")
+    border.Size = bg.Size
+    border.Position = bg.Position
+    border.Color = Color3.fromRGB(80,80,90)
+    border.Filled = false
+    border.Thickness = 2
+    border.Visible = true
+    local title = Drawing.new("Text")
+    title.Text = "Verity is Loading."
+    title.Size = 20
+    title.Color = Color3.fromRGB(255,255,255)
+    title.Position = center - V2New(70, 30)
+    title.Center = true
+    title.Outline = true
+    title.Visible = true
+    local sub = Drawing.new("Text")
+    sub.Text = "Verity is waking up..."
+    sub.Size = 14
+    sub.Color = Color3.fromRGB(180,180,180)
+    sub.Position = center - V2New(80, 5)
+    sub.Center = false
+    sub.Visible = true
+    local barBg = Drawing.new("Square")
+    barBg.Size = V2New(280, 10)
+    barBg.Position = center - V2New(140, -20)
+    barBg.Color = Color3.fromRGB(60,60,70)
+    barBg.Filled = true
+    barBg.Visible = true
+    local bar = Drawing.new("Square")
+    bar.Size = V2New(0, 10)
+    bar.Position = barBg.Position
+    bar.Color = Color3.fromRGB(255,220,55)
+    bar.Filled = true
+    bar.Visible = true
+    local pctText = Drawing.new("Text")
+    pctText.Text = "0%"
+    pctText.Size = 14
+    pctText.Color = Color3.fromRGB(200,200,200)
+    pctText.Position = center + V2New(110, -20)
+    pctText.Visible = true
+    local msgs = {"Verity is waking up...","Verity is checking for Enemies...","Verity is calibrating...","Verity is Ready"}
+    local prog = 0
+    task.spawn(function()
+        while prog < 100 do
+            prog = math.min(prog + math.random(8,18), 100)
+            local w = 280 * prog/100
+            bar.Size = V2New(w, 10)
+            pctText.Text = tostring(prog).."%"
+            if prog < 30 then sub.Text = msgs[1]
+            elseif prog < 60 then sub.Text = msgs[2]
+            elseif prog < 99 then sub.Text = msgs[3]
+            else sub.Text = msgs[4] end
+            wait(0.18)
+        end
+        title.Text = "Verity is Loaded"
+        sub.Text = "Watching aswell."
+        wait(0.7)
+        sub.Visible = false
+        wait(0.4)
+        for _, d in ipairs({bg,border,title,sub,barBg,bar,pctText}) do pcall(function() d:Remove() end) end
+        HUB.VerityLocked = false
+        -- enable Verity dragging via unlock button (handled in assistant)
+        onDone()
+        showToast("Verity is watching", "on")
+    end)
+end
+
+local function BuildHubAndAssistant()
+local rootGui = Instance.new("ScreenGui")
+rootGui.Name = "BASE_UI"
+rootGui.IgnoreGuiInset = true
+rootGui.DisplayOrder = 10
+rootGui.ResetOnSpawn = false
+local okParent, parentErr = pcall(function() rootGui.Parent = gethui and gethui() or game.CoreGui end)
+if not okParent or rootGui.Parent == nil then print("[BASE] parent fallback: " .. tostring(parentErr or "nil")); rootGui.Parent = game.CoreGui end
+print("[BASE] rootGui parent: " .. tostring(rootGui.Parent and rootGui.Parent.Name or "nil"))
+hubUIScale = Instance.new("UIScale"); hubUIScale.Scale = 1; hubUIScale.Parent = rootGui
+HUB.frame = UI.frame({ name="BASE", size=UDim2.new(0, CONFIG.winW, 0, CONFIG.winH), position=CONFIG.winPos, color=COLOR.bg, radius=currentBorderPreset.radius, stroke=COLOR.border, strokeThickness=currentBorderPreset.thickness, parent=rootGui, z=10 })
+local titleBar = UI.frame({ name="TitleBar", size=UDim2.new(1,0,0,CONFIG.titleH), position=UDim2.new(0,0,0,0), color=COLOR.titleBar, parent=HUB.frame, z=20 })
+local monogram = UI.frame({ name="Mono", size=UDim2.new(0,22,0,22), position=UDim2.new(0,8,0,4), color=COLOR.accent, radius=6, parent=titleBar, z=3 })
+UI.theme(monogram, {{role="accent", prop="BackgroundColor3"}})
+UI.label({ name="MonoText", text="B", size=UDim2.new(1,0,1,0), color=Color3.fromRGB(15,15,18), textSize=12, weight="bold", parent=monogram, z=4 })
+local titleLabel = UI.label({ name="Title", text=CONFIG.name, size=UDim2.new(0,120,1,0), position=UDim2.new(0,38,0,0), x=Enum.TextXAlignment.Left, color=COLOR.text, textSize=13, weight="bold", parent=titleBar, z=3 })
+HUB.labels.title = titleLabel
+local accentBar = UI.frame({ name="AccentBar", size=UDim2.new(1,-16,0,2), position=UDim2.new(0,8,1,-2), color=COLOR.accent, radius=1, parent=titleBar, z=2 })
+UI.theme(accentBar, {{role="accent", prop="BackgroundColor3"}})
+FACE.build(titleBar)
+local winBtns = {}
+local function winBtn(x, icon, tooltip, onClick)
+    local b = UI.button({ name="WBtn", text=icon, size=UDim2.new(0,22,0,22), position=UDim2.new(1,x,0.5,-11), color=COLOR.titleBar, textColor=COLOR.textDim, textSize=11, radius=6, parent=titleBar, hoverColor=COLOR.panel, onClick=onClick, z=4 })
+    table.insert(winBtns,b); return b
+end
+local collapseAllBtn = winBtn(-92,"▤","Collapse / expand all sections",function() HUB.toggleAllSections() end)
+local stopAllBtn = winBtn(-68,"■","Stop all loops",function() HUB.stopEverything() end)
+local bellBtn = winBtn(-44,"🔔","Notification center",function() toggleBellCenter() end)
+local minimizeBtn = winBtn(-22,"–","Minimize",function() setMinimized(not HUB.minimized) end)
+local closeBtn = winBtn(4,"✕","Hide window (; to restore)",function() HUB.closeAndStop() end)
+winBtn=nil
+do
+    local dragging=false
+    titleBar.InputBegan:Connect(function(input)
+        if input.UserInputType==Enum.UserInputType.MouseButton1 then
+            if HUB.minimized then setMinimized(false); return end
+            dragging=true
+            local start=UserInputService:GetMouseLocation()
+            local frameAbs=HUB.frame.AbsolutePosition
+            local dx=start.X-frameAbs.X; local dy=start.Y-frameAbs.Y
+            local conn; conn=UserInputService.InputChanged:Connect(function(inp) if dragging and inp.UserInputType==Enum.UserInputType.MouseMovement then local m=UserInputService:GetMouseLocation(); HUB.frame.Position=UDim2.new(0,m.X-dx,0,m.Y-dy) end end)
+            UserInputService.InputEnded:Connect(function(inp) if inp.UserInputType==Enum.UserInputType.MouseButton1 then dragging=false; if conn then conn:Disconnect() end end end)
+        end
+    end)
+    titleBar.InputBegan:Connect(function(input)
+        if input.UserInputType==Enum.UserInputType.MouseButton1 then
+            local t0=os.clock(); local conn; conn=titleBar.InputEnded:Connect(function(inp) if inp.UserInputType==Enum.UserInputType.MouseButton1 then conn:Disconnect(); if os.clock()-t0<0.25 then HUB.frame.Position=UDim2.new(0.5,-HUB.winW/2,0.3,0) end end end)
+        end
+    end)
+end
+local tabBar = UI.frame({ name="TabBar", size=UDim2.new(1,0,0,CONFIG.tabH), position=UDim2.new(0,0,0,CONFIG.titleH), color=COLOR.titleBar, parent=HUB.frame, z=19 })
+local tabs = { {id="main",label="MAIN"}, {id="chase",label="CHASE"}, {id="settings",label="SETTINGS"}, {id="extras",label="EXTRAS"} }
+local tabBtns = {}
+function showPage(id)
+    HUB.currentPage=id
+    for _,tb in ipairs(tabBtns) do local active=tb.id==id; tb.label.TextColor3=active and COLOR.accent or COLOR.textDim; tb.ind.Visible=active end
+    for name,page in pairs(HUB.pages) do if page and page.Visible~=nil then page.Visible=(name==id) end end
+    if HUB.pages.extras and HUB.pages.extras.Visible then showExtrasSubTab(HUB.extrasSubTab or "Server") end
+    EVENTS.fire("page",{page=id})
+end
+for i,t in ipairs(tabs) do
+    local w=1/#tabs
+    local b=UI.frame({ name="Tab_"..t.id, size=UDim2.new(w,0,1,0), position=UDim2.new((i-1)*w,0,0,0), color=COLOR.titleBar, parent=tabBar, z=2 })
+    local l=UI.label({ text=t.label, size=UDim2.new(1,0,1,0), color=COLOR.textDim, textSize=11, weight="bold", parent=b, z=3 })
+    local ind=UI.frame({ name="Ind", size=UDim2.new(0,26,0,2), position=UDim2.new(0.5,-13,1,-2), color=COLOR.accent, radius=1, parent=b, z=4, visible=false })
+    UI.theme(ind,{{role="accent", prop="BackgroundColor3"}})
+    local click=UI.button({ text="", size=UDim2.new(1,0,1,0), position=UDim2.new(0,0,0,0), color=Color3.new(1,1,1), transparency=1, parent=b, hover=false, onClick=function() showPage(t.id) end })
+    b.MouseEnter:Connect(function() if b~=tabBtns[1] then l.TextColor3=COLOR.text end end)
+    b.MouseLeave:Connect(function() if not ind.Visible then l.TextColor3=COLOR.textDim end end)
+    tabBtns[i]={id=t.id, label=l, ind=ind, frame=b}
+end
+HUB.showPage=showPage
+HUB.notifyLayer = UI.frame({ name="NotifyLayer", size=UDim2.new(1,-10,1,-10), position=UDim2.new(0,5,0,5), color=Color3.new(1,1,1), transparency=1, parent=HUB.frame, z=60 })
+HUB.allSectionsCollapsed=false
+HUB.toggleAllSections=function() HUB.allSectionsCollapsed=not HUB.allSectionsCollapsed; for _,h in ipairs(HUB.sectionHeaders) do if h.toggle and h.collapsed~=HUB.allSectionsCollapsed then h.toggle() end end; showToast(HUB.allSectionsCollapsed and "Collapsed all sections" or "Expanded all sections","textDim") end
+function setMinimized(min) HUB.minimized=min; minimizeBtn.Text=min and "▢" or "–"; HUB.frame.Visible=true; for _,page in pairs(HUB.pages) do if page then page.Visible=(not min) and (page==HUB.pages[HUB.currentPage]) end end; titleBar.Visible=true; if min then EVENTS.fire("sleep") else EVENTS.fire("wake") end end
+function HUB.closeAndStop() HUB.stopEverything(); FlingStop(); HUB.frame.Visible=false end
+function HUB.refreshCanvas(view) if not view then return end; local bottom=0; for _,child in ipairs(view:GetChildren()) do if child.Visible~=false and child.Position then local py=child.Position.Y; local cy=py and py.Offset or 0; local sy=child.Size and child.Size.Y; local ch=sy and sy.Offset or 0; if cy+ch>bottom then bottom=cy+ch end end end; HUB.contentBottom[view]=bottom; if view:IsA("ScrollingFrame") then view.CanvasSize=UDim2.new(0,0,0,math.max(bottom+8,1)) end end
+function HUB.fitExtrasWindow(view) if not view then return end; HUB.refreshCanvas(view); local bottom=HUB.contentBottom[view] or 0; if HUB.currentPage=="extras" then local sub=HUB.extrasSubTab; local active=(sub=="ESP" and HUB.views.esp) or (sub=="SPD" and HUB.views.spd) or (sub=="CNSL" and HUB.views.console) or (sub=="TP" and HUB.views.tp) or HUB.views.server; if view==active then local fillsSelf=false; for _,child in ipairs(view:GetChildren()) do local sy=child.Size and child.Size.Y; if sy and sy.Scale>=1 then fillsSelf=true break end end; local fit=fillsSelf and CONFIG.winH or (83+bottom+8); local cam=workspace.CurrentCamera; local vpY=(cam and cam.ViewportSize.Y) or 600; local winH=math.min(fit,vpY-40); HUB.frame.Size=UDim2.new(0,HUB.winW,0,winH); view.Size=UDim2.new(1,0,1,-53) end end end
+local extrasTabBtns={}; function showExtrasSubTab(id) HUB.extrasSubTab=id; for _,tb in ipairs(extrasTabBtns) do tb.label.TextColor3=(tb.id==id) and COLOR.accent or COLOR.textDim; tb.ind.Visible=(tb.id==id) end; local views={ CNSL=HUB.views.console, ESP=HUB.views.esp, Server=HUB.views.server, TP=HUB.views.tp }; for name,v in pairs(views) do if v then v.Visible=(name==id) end end; if views[id] then HUB.fitExtrasWindow(views[id]) end end; HUB.showExtrasSubTab=showExtrasSubTab
+function buildExtrasTabs() local bar=UI.frame({ name="ExtrasTabs", size=UDim2.new(1,0,0,24), position=UDim2.new(0,0,0,0), color=COLOR.titleBar, parent=HUB.pages.extras, z=10 }); local items={{id="CNSL",label="CONSOLE"},{id="ESP",label="ESP"},{id="Server",label="SERVER"},{id="TP",label="TP"}}; for i,it in ipairs(items) do local w=1/#items; local b=UI.frame({ name="ETab_"..it.id, size=UDim2.new(w,0,1,0), position=UDim2.new((i-1)*w,0,0,0), color=COLOR.titleBar, parent=bar, z=2 }); local l=UI.label({ text=it.label, size=UDim2.new(1,0,1,0), color=COLOR.textDim, textSize=10, weight="bold", parent=b, z=3 }); local ind=UI.frame({ name="Ind", size=UDim2.new(0,22,0,2), position=UDim2.new(0.5,-11,1,-2), color=COLOR.accent, radius=1, parent=b, z=4, visible=false }); UI.theme(ind,{{role="accent", prop="BackgroundColor3"}}); UI.button({ text="", size=UDim2.new(1,0,1,0), position=UDim2.new(0,0,0,0), color=Color3.new(1,1,1), transparency=1, parent=b, hover=false, onClick=function() showExtrasSubTab(it.id) end }); table.insert(extrasTabBtns,{id=it.id, label=l, ind=ind}) end end
+local flyoutBtn,flyoutPanel; function buildFlyout() flyoutBtn=UI.button({ name="FlyoutBtn", text="≡", size=UDim2.new(0,24,0,24), position=UDim2.new(1,-30,0,CONFIG.titleH+4), color=COLOR.titleBar, textColor=COLOR.textDim, textSize=14, radius=6, parent=HUB.frame, z=18, onClick=function() flyoutPanel.Visible=not flyoutPanel.Visible end }); flyoutPanel=UI.frame({ name="Flyout", size=UDim2.new(0,150,0,210), position=UDim2.new(1,-152,0,CONFIG.titleH+32), color=COLOR.titleBar, radius=8, stroke=COLOR.border, strokeThickness=1, parent=HUB.frame, visible=false, z=45 }); local items={{text="MAIN",page="main"},{text="CHASE",page="chase"},{text="SETTINGS",page="settings"},{text="EXTRAS",page="extras"},{text="CONSOLE",sub="CNSL"},{text="ESP",sub="ESP"},{text="SERVER",sub="Server"},{text="TP",sub="TP"}}; for i,it in ipairs(items) do UI.button({ text=it.text, size=UDim2.new(1,-12,0,22), position=UDim2.new(0,6,0,6+(i-1)*24), color=COLOR.panel, textColor=COLOR.text, textSize=11, radius=5, parent=flyoutPanel, onClick=function() flyoutPanel.Visible=false; if it.sub then showPage("extras"); showExtrasSubTab(it.sub) else showPage(it.page) end end }) end end
+local bellPanel,bellMode=nil,"history"; function buildBell() bellPanel=UI.frame({ name="BellPanel", size=UDim2.new(0,200,0,180), position=UDim2.new(1,-206,0,CONFIG.titleH+4), color=COLOR.titleBar, radius=8, stroke=COLOR.border, strokeThickness=1, parent=HUB.frame, visible=false, z=44 }); local histList=Instance.new("ScrollingFrame"); histList.Name="History"; histList.Size=UDim2.new(1,-12,1,-34); histList.Position=UDim2.new(0,6,0,28); histList.BackgroundColor3=COLOR.bg; histList.BorderSizePixel=0; histList.CanvasSize=UDim2.new(0,0,0,1); histList.ScrollBarThickness=4; histList.Parent=bellPanel; UI.round(histList,6); local modeBtns={}; local function setMode(m) bellMode=m; for _,b in ipairs(modeBtns) do b.label.TextColor3=(b.id==m) and COLOR.accent or COLOR.textDim end end; local labels={{id="history",text="History"},{id="settings",text="Settings"}}; for i,m in ipairs(labels) do local b=UI.frame({ name="Mode_"..m.id, size=UDim2.new(0,70,0,20), position=UDim2.new(i==1 and 0 or 76,6,0,4), color=COLOR.titleBar, parent=bellPanel, z=4 }); local l=UI.label({ text=m.text, size=UDim2.new(1,0,1,0), color=COLOR.textDim, textSize=10, weight="bold", parent=b }); UI.button({ text="", size=UDim2.new(1,0,1,0), position=UDim2.new(0,0,0,0), color=Color3.new(1,1,1), transparency=1, parent=b, hover=false, onClick=function() setMode(m.id) end }); table.insert(modeBtns,{id=m.id, label=l}) end; EVENTS.on("toast",function(info) if not HUB.notifyHistory then return end; table.insert(HUB.notifyHistory,1,info); if #HUB.notifyHistory>24 then table.remove(HUB.notifyHistory) end; if bellPanel and bellPanel.Visible and bellMode=="history" then renderHistory() end end); function renderHistory() for _,c in ipairs(histList:GetChildren()) do if c.Name=="HistRow" then c:Destroy() end end; local list=HUB.notifyHistory or {}; for i,entry in ipairs(list) do UI.label({ name="HistRow", text=entry.text, size=UDim2.new(1,-8,0,18), position=UDim2.new(0,4,0,(i-1)*20), x=Enum.TextXAlignment.Left, color=COLOR.textDim, textSize=10, parent=histList }) end; histList.CanvasSize=UDim2.new(0,0,0,math.max(#list*20,1)) end end; function toggleBellCenter() if not bellPanel then buildBell() end; bellPanel.Visible=not bellPanel.Visible; if bellPanel.Visible then renderHistory() end end; buildFlyout(); buildBell()
+function buildTerminal(parent) local termBar=UI.frame({ name="TermBar", size=UDim2.new(1,0,0,26), position=UDim2.new(0,0,1,-26), color=COLOR.titleBar, parent=parent, z=30 }); local strip=UI.frame({ name="Strip", size=UDim2.new(0,3,0,26), position=UDim2.new(0,0,0,0), color=COLOR.on, parent=termBar, z=4 }); local input=Instance.new("TextBox"); input.Name="CmdInput"; input.Size=UDim2.new(1,-10,1,0); input.Position=UDim2.new(0,8,0,0); input.BackgroundTransparency=1; input.Text=""; input.TextColor3=COLOR.text; input.Font=currentFontPreset.regular; input.TextSize=11; input.TextXAlignment=Enum.TextXAlignment.Left; input.PlaceholderText="type a command...  (\\ chains commands, /help lists them)"; input.ClearTextOnFocus=true; input.Parent=termBar; input.FocusLost:Connect(function(enter) if enter then local text=input.Text; if text~="" then execCmd(text) end; input.Text="" end end); return termBar end
+
+-- Verity Drawing assistant (separate small window, ESP spawn) ---------------
+if HAS_DRAWING then
+    local Camera = workspace.CurrentCamera
+    local V2New = Vector2.new
+    local Menu = {}
+    local UIButtons = {}
+    local Sliders = {}
+    local DraggingUI = false
+    local DragOffset = V2New()
+    local MouseHeld = false
+    local Dragging = false
+    local DraggingWhat = nil
+    local OIndex = 0
+    local Options = setmetatable({}, {
+        __call = function(t, ...)
+            local Arguments = {...}
+            local Name = Arguments[1]
+            OIndex = OIndex + 1
+            rawset(t, Name, setmetatable({
+                Name = Arguments[1],
+                Text = Arguments[2],
+                Value = Arguments[3],
+                DefaultValue = Arguments[3],
+                AllArgs = Arguments,
+                Index = OIndex,
+            }, {
+                __call = function(t2, v, force)
+                    if typeof(t2.Value) == 'function' then
+                        t2.Value()
+                    elseif typeof(t2.Value) == 'EnumItem' then
+                        if not force then
+                            _G.VerityBinding = true
+                            local Val = 0
+                            while _G.VerityBinding do
+                                wait()
+                                Val = (Val + 1) % 17
+                                local BT = Menu:GetInstance(string.format('%s_BindText', t2.Name))
+                                if BT then
+                                    BT.Text = Val <= 8 and '|' or ''
+                                end
+                            end
+                        end
+                        t2.Value = force and v or _G.VerityBindedKey
+                        if t2.BasePosition and t2.BaseSize then
+                            local BT = Menu:GetInstance(string.format('%s_BindText', t2.Name))
+                            if BT then
+                                BT.Text = tostring(t2.Value):match('%w+%.%w+%.(.+)')
+                                BT.Position = t2.BasePosition + V2New(t2.BaseSize.X - BT.TextBounds.X - 20, -10)
+                            end
+                        end
+                    else
+                        local NewValue = v
+                        if NewValue == nil then
+                            NewValue = not t2.Value
+                        end
+                        rawset(t2, 'Value', NewValue)
+                        if Arguments[2] ~= nil and Menu:GetInstance('TopBar') and Menu:GetInstance('TopBar').Visible then
+                            if typeof(Arguments[3]) == 'number' then
+                                local AMT = Menu:GetInstance(string.format('%s_AmountText', t2.Name))
+                                if AMT then
+                                    AMT.Text = tostring(t2.Value)
+                                end
+                            else
+                                local Inner = Menu:GetInstance(string.format('%s_InnerCircle', t2.Name))
+                                if Inner then
+                                    Inner.Visible = t2.Value
+                                end
+                            end
+                        end
+                    end
+                end
+            }))
+        end
+    })
+    local function Set(t,i,v) t[i]=v end
+    local function NewDrawing(InstanceName) local Instance = Drawing.new(InstanceName); return (function(Properties) for i,v in pairs(Properties) do pcall(Set, Instance, i, v) end; return Instance end) end
+    function Menu:AddMenuInstance(Name, DrawingType, Properties)
+        local Instance
+        if shared.VerityMenuData and shared.VerityMenuData.Instances[Name] ~= nil then Instance = shared.VerityMenuData.Instances[Name]; for i,v in pairs(Properties) do pcall(Set, Instance, i, v) end
+        else Instance = NewDrawing(DrawingType)(Properties) end
+        shared.VerityMenuData = shared.VerityMenuData or { Instances = {} }; shared.VerityMenuData.Instances[Name]=Instance; return Instance
+    end
+    function Menu:UpdateMenuInstance(Name) local Instance = shared.VerityMenuData.Instances[Name]; if Instance~=nil then return (function(Properties) for i,v in pairs(Properties) do pcall(Set, Instance, i, v) end; return Instance end) end end
+    function Menu:GetInstance(Name) return shared.VerityMenuData and shared.VerityMenuData.Instances[Name] or nil end
+    local function GetMouseLocation() return UserInputService:GetMouseLocation() end
+    local function MouseHoveringOver(Values) local X1,Y1,X2,Y2=Values[1],Values[2],Values[3],Values[4]; local MLocation=GetMouseLocation(); return (MLocation.x>=X1 and MLocation.x<=(X1+(X2-X1))) and (MLocation.y>=Y1 and MLocation.y<=(Y1+(Y2-Y1))) end
+    local Colors = { White=Color3.fromHex'ffffff', Primary={ Main=Color3.fromHex'424242', Light=Color3.fromHex'6d6d6d', Dark=Color3.fromHex'1b1b1b' }, Secondary={ Main=Color3.fromHex'e0e0e0', Light=Color3.fromHex'ffffff', Dark=Color3.fromHex'aeaeae' } }
+    local VerityHead = Color3.fromRGB(255,220,55)
+    local VerityFaceDrawings = {}
+    local VerityState = "neutral"
+    local VerityHairOn = false
+    local VeritySettingsOpen = false
+    local VerityStatements = { "Verity is watching.", "Stay focused.", "I am here to help.", "Need something?", "All systems nominal.", "Eyes on the target." }
+    local MeanStatements = { "You are testing my patience.", "That tone is unnecessary.", "I can be difficult too.", "Be careful what you wish for." }
+    local MeanCount = 0
+    local SessionStart = os.clock()
+    local function CalculateValue(Min,Max,Percent) return Min + math.floor(((Max-Min)*Percent)+.5) end
+    local function updateVerityFace()
+        local head = VerityFaceDrawings.Head
+        if not head then return end
+        -- eye shadow based on session length (darker bags over time)
+        local elapsed = os.clock() - SessionStart
+        local bagAlpha = math.clamp(elapsed/3600, 0, 0.55) -- max after 1h
+        if VerityFaceDrawings.BagL then VerityFaceDrawings.BagL.Transparency = 1 - bagAlpha*0.7; VerityFaceDrawings.BagL.Visible = bagAlpha>0.05 end
+        if VerityFaceDrawings.BagR then VerityFaceDrawings.BagR.Transparency = 1 - bagAlpha*0.7; VerityFaceDrawings.BagR.Visible = bagAlpha>0.05 end
+        -- mean crazier mouth if MeanCount high
+        if MeanCount > 4 and VerityState~="glitch" then
+            if VerityFaceDrawings.Mouth then VerityFaceDrawings.Mouth.Text = string.rep("U", math.min(MeanCount-2,4)) end
+        end
+    end
+    local function CreateVerityMenu(NewPosition)
+        UIButtons={}; Sliders={}
+        local BaseSize=V2New(300, 340)
+        local BasePosition=NewPosition or V2New(Camera.ViewportSize.X/8 - (BaseSize.X/2), Camera.ViewportSize.Y/2 - (BaseSize.Y/2))
+        BasePosition=V2New(math.clamp(BasePosition.X,0,Camera.ViewportSize.X), math.clamp(BasePosition.Y,0,Camera.ViewportSize.Y))
+        shared.VerityMenuData=shared.VerityMenuData or {Instances={}}
+        Menu:AddMenuInstance('V_Main','Square',{ Size=BaseSize, Position=BasePosition, Filled=false, Color=Colors.Primary.Main, Thickness=3, Visible=true })
+        Menu:AddMenuInstance('V_TopBar','Square',{ Position=BasePosition, Size=V2New(BaseSize.X,15), Color=Colors.Primary.Dark, Filled=true, Visible=true })
+        Menu:AddMenuInstance('V_TopBarTwo','Square',{ Position=BasePosition+V2New(0,15), Size=V2New(BaseSize.X,45), Color=Colors.Primary.Main, Filled=true, Visible=true })
+        Menu:AddMenuInstance('V_TopBarText','Text',{ Size=22, Position=Menu:GetInstance('V_TopBarTwo').Position+V2New(BaseSize.X/2, 8), Text='VERITY', Color=Colors.Secondary.Light, Visible=true, Transparency=1, Outline=true, Center=true })
+        Menu:AddMenuInstance('V_TopBarSub','Text',{ Size=12, Position=Menu:GetInstance('V_TopBarTwo').Position+V2New(BaseSize.X/2, 30), Text='Assistant', Color=Colors.Secondary.Light, Visible=true, Transparency=1, Outline=true, Center=true })
+        Menu:AddMenuInstance('V_Filling','Square',{ Size=BaseSize-V2New(0,60), Position=BasePosition+V2New(0,60), Filled=true, Color=Colors.Secondary.Main, Transparency=.35, Visible=true })
+        local FaceCenter=Menu:GetInstance('V_Filling').Position + V2New(BaseSize.X/2, 55)
+        local FaceRadius=38
+        VerityFaceDrawings.Head=Menu:AddMenuInstance('V_Head','Circle',{ Position=FaceCenter, Radius=FaceRadius, Color=VerityHead, Filled=true, Visible=true, Transparency=1, NumSides=32 })
+        VerityFaceDrawings.HeadOutline=Menu:AddMenuInstance('V_HeadOutline','Circle',{ Position=FaceCenter, Radius=FaceRadius+2, Color=Color3.new(0,0,0), Filled=false, Thickness=2, Visible=true, Transparency=0.9, NumSides=32 })
+        VerityFaceDrawings.EyeL=Menu:AddMenuInstance('V_EyeL','Circle',{ Position=FaceCenter+V2New(-14,-8), Radius=7, Color=Color3.new(0,0,0), Filled=true, Visible=true, NumSides=12 })
+        VerityFaceDrawings.EyeR=Menu:AddMenuInstance('V_EyeR','Circle',{ Position=FaceCenter+V2New(14,-8), Radius=7, Color=Color3.new(0,0,0), Filled=true, Visible=true, NumSides=12 })
+        VerityFaceDrawings.BagL=Menu:AddMenuInstance('V_BagL','Square',{ Position=FaceCenter+V2New(-20,2), Size=V2New(14,6), Color=Color3.fromRGB(60,40,40), Filled=true, Visible=false, Transparency=0.9 })
+        VerityFaceDrawings.BagR=Menu:AddMenuInstance('V_BagR','Square',{ Position=FaceCenter+V2New(6,2), Size=V2New(14,6), Color=Color3.fromRGB(60,40,40), Filled=true, Visible=false, Transparency=0.9 })
+        VerityFaceDrawings.Mouth=Menu:AddMenuInstance('V_Mouth','Text',{ Position=FaceCenter+V2New(0,18), Text='U', Size=20, Color=Color3.new(0,0,0), Visible=true, Center=true, Outline=false })
+        VerityFaceDrawings.Hair=Menu:AddMenuInstance('V_Hair','Square',{ Position=FaceCenter+V2New(-FaceRadius, -FaceRadius-6), Size=V2New(FaceRadius*2, 14), Color=Color3.fromRGB(24,24,28), Filled=true, Visible=false, Transparency=1 })
+        Menu:AddMenuInstance('V_Info','Text',{ Position=FaceCenter+V2New(0,52), Text='State: neutral', Size=13, Color=Colors.Primary.Dark, Visible=true, Center=true, Outline=true })
+        -- Controls: Active toggle, Wardrobe button, statement area
+        local CPos=135
+        Options('V_Active','Active',true, 0, 1)
+        -- keep a reference for wiring
+        local ActiveOpt = Options['V_Active']
+        -- Override call to also update VerityState text
+        do local mt=getmetatable(ActiveOpt); local old=mt.__call; mt.__call=function(t,v,f) old(t,v,f); local info=Menu:GetInstance('V_Info'); if info then info.Text=string.format('State: %s', VerityState) end end end
+        -- Wardrobe button (consolidated Verity settings)
+        Menu:AddMenuInstance('V_WardrobeBtn','Square',{ Position=Menu:GetInstance('V_Filling').Position+V2New(15, CPos-5), Size=V2New(BaseSize.X-30, 22), Color=Colors.Primary.Main, Filled=true, Visible=true, Transparency=0.9 })
+        Menu:AddMenuInstance('V_WardrobeText','Text',{ Position=Menu:GetInstance('V_WardrobeBtn').Position+V2New(BaseSize.X/2-15, 3), Text='Wardrobe  ▸', Size=16, Color=Colors.Secondary.Light, Visible=true, Center=true })
+        UIButtons[#UIButtons+1]={ Option={ Name='Wardrobe', Text='Wardrobe', Value=function()
+            VeritySettingsOpen = not VeritySettingsOpen
+            local btnText=Menu:GetInstance('V_WardrobeText'); if btnText then btnText.Text = VeritySettingsOpen and 'Wardrobe  ▾' or 'Wardrobe  ▸' end
+            for _, n in ipairs({'V_Head','V_Hair','V_Eyes','V_Eyebrows','V_Mouth','V_Body','V_Clothing','V_Accessories','V_Effects'}) do
+                local outer=Menu:GetInstance(n..'_OuterCircle'); if outer then outer.Visible=VeritySettingsOpen end
+                local inner=Menu:GetInstance(n..'_InnerCircle'); if inner then inner.Visible=VeritySettingsOpen and Options[n].Value or false end
+                local txt=Menu:GetInstance(n..'_Text'); if txt then txt.Visible=VeritySettingsOpen end
+                local hit=Menu:GetInstance(n..'_Hitbox'); if hit and hit.Visible~=nil then hit.Visible=VeritySettingsOpen end
+            end
+            -- grey out Effects if session locked
+            if VeritySettingsOpen then
+                local effOuter=Menu:GetInstance('V_Effects_OuterCircle'); if effOuter and (MeanCount>5 or VerityState=='glitch') then effOuter.Color=Color3.fromRGB(100,100,100) end
+            end
+            local stmt=Menu:GetInstance('V_Statement'); if stmt then stmt.Visible=not VeritySettingsOpen end
+        end }, Instance=Menu:AddMenuInstance('V_WardrobeHit','Square',{ Position=Menu:GetInstance('V_WardrobeBtn').Position, Size=Menu:GetInstance('V_WardrobeBtn').Size, Visible=false }) }
+        CPos=CPos+30
+        -- Lock/unlock Verity window
+        Menu:AddMenuInstance('V_LockBtn','Square',{ Position=Menu:GetInstance('V_Filling').Position+V2New(15, CPos-5), Size=V2New(BaseSize.X-30, 18), Color=Colors.Primary.Dark, Filled=true, Visible=true, Transparency=0.9 })
+        Menu:AddMenuInstance('V_LockText','Text',{ Position=Menu:GetInstance('V_LockBtn').Position+V2New(BaseSize.X/2-15, 2), Text=HUB.VerityLocked and 'Locked — click to unlock' or 'Unlocked', Size=12, Color=Colors.Secondary.Light, Visible=true, Center=true })
+        UIButtons[#UIButtons+1]={ Option={ Name='Lock', Value=function() HUB.VerityLocked = not HUB.VerityLocked; local txt=Menu:GetInstance('V_LockText'); if txt then txt.Text = HUB.VerityLocked and 'Locked — click to unlock' or 'Unlocked — click to lock' end; showToast(HUB.VerityLocked and 'Verity locked' or 'Verity unlocked','textDim') end }, Instance=Menu:AddMenuInstance('V_LockHit','Square',{ Position=Menu:GetInstance('V_LockBtn').Position, Size=Menu:GetInstance('V_LockBtn').Size, Visible=false }) }
+        CPos=CPos+24
+        -- Wardrobe settings (hidden until button)
+        local function addWardrobeToggle(name, text, def)
+            Options(name, text, def)
+        end
+        addWardrobeToggle('V_Head','Head',true)
+        addWardrobeToggle('V_Hair','Hair',false)
+        addWardrobeToggle('V_Eyes','Eyes',true)
+        addWardrobeToggle('V_Eyebrows','Eyebrows',true)
+        addWardrobeToggle('V_Mouth','Mouth',true)
+        addWardrobeToggle('V_Body','Body',false)
+        addWardrobeToggle('V_Clothing','Clothing',true)
+        addWardrobeToggle('V_Accessories','Accessories',false)
+        addWardrobeToggle('V_Effects','Effects',false)
+        -- draw wardrobe toggles (initially hidden)
+        local wY=CPos
+        for _, name in ipairs({'V_Head','V_Hair','V_Eyes','V_Eyebrows','V_Mouth','V_Body','V_Clothing','V_Accessories','V_Effects'}) do
+            local opt=Options[name]
+            if opt then
+                local BasePosition=Menu:GetInstance('V_Filling').Position+V2New(30, wY)
+                UIButtons[#UIButtons+1]={ Option=opt, Instance=Menu:AddMenuInstance(name..'_Hitbox','Square',{ Position=BasePosition-V2New(30,15), Size=V2New(BaseSize.X,30), Visible=false }) }
+                Menu:AddMenuInstance(name..'_OuterCircle','Circle',{ Radius=10, Position=BasePosition, Color=Colors.Secondary.Light, Filled=true, Visible=false })
+                Menu:AddMenuInstance(name..'_InnerCircle','Circle',{ Radius=7, Position=BasePosition, Color=Colors.Secondary.Dark, Filled=true, Visible=false })
+                Menu:AddMenuInstance(name..'_Text','Text',{ Text=opt.Text, Size=16, Position=BasePosition+V2New(20,-8), Visible=false, Color=Colors.Primary.Dark })
+                wY=wY+25
+            end
+        end
+        -- wrap callbacks for wardrobe toggles (Head→Hair→Eyes→Eyebrows→Mouth→Body→Clothing→Accessories→Effects)
+        do
+            local function wrap(name, fn)
+                local opt=Options[name]; if not opt then return end; local mt=getmetatable(opt); local old=mt.__call; mt.__call=function(t,v,f)
+                    -- session lock for Effects (grey out when max)
+                    if name=='V_Effects' and (MeanCount>5 or VerityState=='glitch') then
+                        local outer=Menu:GetInstance(name..'_OuterCircle'); if outer then outer.Color=Color3.fromRGB(100,100,100) end
+                        return
+                    end
+                    old(t,v,f); pcall(fn,t)
+                end
+            end
+            wrap('V_Hair', function(t) VerityHairOn=t.Value; local hair=VerityFaceDrawings.Hair; if hair then hair.Visible=t.Value end; VERITY.setHair(t.Value) end)
+            wrap('V_Head', function(t) local head=VerityFaceDrawings.Head; if head then head.Color = t.Value and VerityHead or Color3.fromRGB(220,220,210) end end)
+            wrap('V_Eyes', function(t) local eyes={VerityFaceDrawings.EyeL, VerityFaceDrawings.EyeR}; for _,e in ipairs(eyes) do if e then e.Radius = t.Value and 7 or 5 end end end)
+            wrap('V_Eyebrows', function(t) local brows={VerityFaceDrawings.BagL and VerityFaceDrawings.BagL or nil}; -- brows are BagL/R for now, use eye brows
+                if browL then browL.Visible=t.Value end; if browR then browR.Visible=t.Value end end)
+            wrap('V_Mouth', function(t) local m=VerityFaceDrawings.Mouth; if m then m.Text = t.Value and 'U' or '_' end end)
+            wrap('V_Body', function(t) -- body is Head size
+                local head=VerityFaceDrawings.Head; if head then head.Radius = t.Value and 38 or 32 end end)
+            wrap('V_Clothing', function(t) local head=VerityFaceDrawings.Head; if head then head.Color = t.Value and VerityHead or Color3.fromRGB(200,200,255) end end)
+            wrap('V_Accessories', function(t) -- accessories as hair detail
+                local hair=VerityFaceDrawings.Hair; if hair then hair.Visible = t.Value or VerityHairOn end end)
+            wrap('V_Effects', function(t)
+                if t.Value then VERITY.set("glitch","wardrobe"); VerityState="glitch" else VERITY.set("neutral","wardrobe"); VerityState="neutral" end
+                local info=Menu:GetInstance('V_Info'); if info then info.Text='State: '..VerityState end
+                local m=VerityFaceDrawings.Mouth; if m then m.Text = t.Value and 'X' or 'U' end
+            end)
+        end
+        -- Statement area at bottom (visible when wardrobe closed)
+        local stmtText = VerityStatements[1]
+        Menu:AddMenuInstance('V_Statement','Text',{ Position=Menu:GetInstance('V_Filling').Position+V2New(BaseSize.X/2, BaseSize.Y-75), Text=stmtText, Size=14, Color=Colors.Primary.Dark, Visible=true, Center=true, Outline=true })
+        -- periodic statement update
+        task.spawn(function() while true do wait(12); if not VeritySettingsOpen then local stmt=Menu:GetInstance('V_Statement'); if stmt and stmt.Visible then local pool = MeanCount>3 and MeanStatements or VerityStatements; stmt.Text = pool[math.random(1,#pool)] end end; updateVerityFace() end end)
+        -- mean detection (simple: if user spams toggle, increase MeanCount)
+        local toggleCount=0; local lastToggle=0
+        -- hook Options for VerityActive to count rapid toggles as mean
+        -- session eyebag update every 60s
+        task.spawn(function() while true do wait(60); updateVerityFace() end end)
+        shared.VerityMenuData.BasePosition=BasePosition; shared.VerityMenuData.BaseSize=BaseSize
+    end
+    shared.VerityMenuData=shared.VerityMenuData or {Instances={}}
+    CreateVerityMenu()
+    if shared.VerityInputBegan then shared.VerityInputBegan:Disconnect() end
+    if shared.VerityInputChanged then shared.VerityInputChanged:Disconnect() end
+    if shared.VerityInputEnded then shared.VerityInputEnded:Disconnect() end
+    shared.VerityInputBegan=UserInputService.InputBegan:Connect(function(input)
+        if input.UserInputType.Name=='MouseButton1' then
+            MouseHeld=true
+            local Bar=Menu:GetInstance('V_TopBar')
+            if HUB.VerityLocked then
+                -- locked, no drag
+            elseif Bar and MouseHoveringOver({Bar.Position.X, Bar.Position.Y, Bar.Position.X+Bar.Size.X, Bar.Position.Y+Bar.Size.Y}) then DraggingUI=true; DragOffset=Menu:GetInstance('V_Main').Position-GetMouseLocation()
+            else
+                for _,v in pairs(Sliders) do if MouseHoveringOver({v.Line.Position.X, v.Line.Position.Y, v.Line.Position.X+v.Line.Size.X, v.Line.Position.Y+v.Line.Size.Y}) then DraggingWhat=v; Dragging=true; break end end
+            end
+        elseif input.UserInputType.Name=='Keyboard' then
+            if _G.VerityBinding then _G.VerityBindedKey=input.KeyCode; _G.VerityBinding=false end
+            -- mean detection: rude words
+            if input.KeyCode==Enum.KeyCode.Return or input.KeyCode==Enum.KeyCode.Backspace then
+                -- check last command for mean words (simple)
+                -- MeanCount increase is handled via toast/command hooks below
+            end
+        end
+    end)
+    shared.VerityInputChanged=UserInputService.InputChanged:Connect(function(input)
+        if input.UserInputType.Name=='MouseMovement' and Menu:GetInstance('V_Main') and Menu:GetInstance('V_Main').Visible then
+            if MouseHeld then
+                if Dragging then
+                    DraggingWhat.Slider.Position=V2New(math.clamp(GetMouseLocation().X - DraggingWhat.Slider.Size.X/2, DraggingWhat.Line.Position.X, DraggingWhat.Line.Position.X+DraggingWhat.Line.Size.X-DraggingWhat.Slider.Size.X), DraggingWhat.Slider.Position.Y)
+                    local Percent=(DraggingWhat.Slider.Position.X-DraggingWhat.Line.Position.X)/((DraggingWhat.Line.Position.X+DraggingWhat.Line.Size.X-DraggingWhat.Line.Position.X)-DraggingWhat.Slider.Size.X)
+                    local Value=CalculateValue(DraggingWhat.Min,DraggingWhat.Max,Percent); DraggingWhat.Option(Value)
+                elseif DraggingUI then
+                    local Main=Menu:GetInstance('V_Main')
+                    Main.Position=GetMouseLocation()+DragOffset
+                    CreateVerityMenu(Main.Position)
+                end
+            end
+        end
+    end)
+    shared.VerityInputEnded=UserInputService.InputEnded:Connect(function(input)
+        if input.UserInputType.Name=='MouseButton1' then
+            MouseHeld=false; Dragging=false
+            if DraggingWhat then DraggingWhat=nil end
+            for _,v in pairs(UIButtons) do
+                if MouseHoveringOver({v.Instance.Position.X, v.Instance.Position.Y, v.Instance.Position.X+v.Instance.Size.X, v.Instance.Position.Y+v.Instance.Size.Y}) then
+                    if typeof(v.Option)=='table' and typeof(v.Option.Value)=='function' then
+                        pcall(v.Option.Value)
+                    elseif typeof(v.Option)=='function' then
+                        pcall(v.Option)
+                    else
+                        pcall(function() v.Option() end)
+                    end
+                    break
+                end
+            end
+            if DraggingUI then DraggingUI=false; CreateVerityMenu(Menu:GetInstance('V_Main').Position) end
+        end
+    end)
+    -- hook mean reactions: count rapid toggles and rude toast
+    local origToast = showToast
+    showToast = function(text, tone)
+        if typeof(text)=='string' and (text:lower():find("idiot") or text:lower():find("stupid") or text:lower():find("hate")) then MeanCount = MeanCount + 2; if MeanCount>3 then VERITY.set("annoyed","mean"); local stmt=Menu:GetInstance('V_Statement'); if stmt then stmt.Text=MeanStatements[math.random(1,#MeanStatements)] end end end
+        return origToast(text, tone)
+    end
+    print("[BASE] part4 ok (Verity Drawing assistant + Frame hub)")
+end
+end -- end BuildHubAndAssistant
+if HAS_DRAWING then
+    RunSplash(BuildHubAndAssistant)
+else
+    BuildHubAndAssistant()
+end
+
+-- =====================================================================
+-- PART 8. PAGES -- tab pages + extras sub-views
+-- Pages are ScrollingFrames (except Extras which hosts its own sub-views):
+-- content taller than the window scrolls via CanvasSize, placed through a
+-- sequential flow cursor (HUB.pageSections maps section -> feature ids).
+-- Headers always sit directly above their rows, never over a neighbour.
+-- =====================================================================
+local function pageCanvas(parent, startY)
+    local y = startY or CONFIG.flowPad
+    return {
+        frame = parent,
+        header = function(text, id)
+            y = y + CONFIG.flowPad
+            local row, _ = UI.section({ text = text, y = y, parent = parent, id = id })
+            y = y + CONFIG.headerH + CONFIG.headerPad
+            return row
+        end,
+        rowY = function()
+            local v = y
+            y = y + CONFIG.rowH + CONFIG.rowGap
+            return v
+        end,
+        add = function(h)
+            y = y + (h or 0) + CONFIG.sectionGap
+        end,
+        pos = function()
+            return y
+        end,
+        reset = function(v) y = v end,
+    }
+end
+
+local function pageFrame(id, scroll)
+    local p
+    if scroll ~= false then
+        p = Instance.new("ScrollingFrame")
+        p.Name = id
+        p.Size = UDim2.new(1, 0, 1, -(CONFIG.titleH + CONFIG.tabH))
+        p.Position = UDim2.new(0, 0, 0, CONFIG.titleH + CONFIG.tabH)
+        p.BackgroundColor3 = COLOR.bg
+        p.BackgroundTransparency = 0
+        p.BorderSizePixel = 0
+        p.CanvasSize = UDim2.new(0, 0, 0, 800)
+        p.ScrollBarThickness = 6
+        pcall(function() p.ScrollingDirection = Enum.ScrollingDirection.Y end)
+        p.Active = true
+        p.ClipsDescendants = true
+        p.Visible = false
+        p.Parent = HUB.frame
+    else
+        p = Instance.new("Frame")
+        p.Name = id
+        p.Size = UDim2.new(1, 0, 1, -(CONFIG.titleH + CONFIG.tabH))
+        p.Position = UDim2.new(0, 0, 0, CONFIG.titleH + CONFIG.tabH)
+        p.BackgroundColor3 = COLOR.bg
+        p.BackgroundTransparency = 0
+        p.BorderSizePixel = 0
+        p.Visible = false
+        p.Parent = HUB.frame
+    end
+    return p
+end
+
+HUB.layout = {}
+
+-- Section map: the single source of truth for page structure. A section
+-- = { id, label, features = { feature ids in render order } }.
+HUB.pageSections = {
+    main = {
+        { id = "main-local", label = "LOCAL PLAYER", features = { "noclip", "fly", "speed", "jumppower", "swim", "god", "freecam", "fov", "antiafk" } },
+        { id = "main-players", label = "PLAYERS", features = { "players" } },
+    },
+    chase = {
+        { id = "chase-target", label = "TARGET", features = { "chase-target" } },
+        { id = "chase-behaviour", label = "BEHAVIOUR", features = { "chase-behaviour" } },
+        { id = "chase-movement", label = "MOVEMENT", features = { "chase-movement" } },
+    },
+}
+
+-- MAIN page --------------------------------------------------------------
+do
+    local page = pageFrame("MainPage")
+    HUB.pages.main = page
+
+    UI.label({
+        text = "MAIN", size = UDim2.new(1, -20, 0, 20), position = UDim2.new(0, 10, 0, 6),
+        x = Enum.TextXAlignment.Left, color = COLOR.accent, textSize = 14, weight = "bold", parent = page,
+    })
+
+    local quick = UI.frame({
+        name = "Quick", size = UDim2.new(1, -20, 0, CONFIG.rowH + 6), position = UDim2.new(0, 10, 0, 30),
+        color = COLOR.titleBar, radius = 8, parent = page, z = 2,
+    })
+    HUB.rows.quickBar = quick
+    local pills = {
+        { label = "NOCLIP", cmd = "noclip", id = "noclip" },
+        { label = "FLY",    cmd = "fly",    id = "fly" },
+        { label = "GOD",    cmd = "god",    id = "god" },
+        { label = "FOV",    cmd = "fov",    id = nil },
+        { label = "FREE CAM", cmd = "freecam", id = "freecam" },
+    }
+    local pillW = 92
+    local pillBtns = {}
+    for i, def in ipairs(pills) do
+        local btn = UI.pill({
+            text = def.label, size = UDim2.new(0, pillW, 0, CONFIG.rowH), position = UDim2.new(0, 6 + (i - 1) * (pillW + 6), 0, 3),
+            parent = quick,
+            onClick = function() addcmd(def.cmd) end,
+        })
+        pillBtns[def.id or def.label] = btn
+    end
+    -- Sync pill highlight with toggle state
+    EVENTS.on("toggle", function(info)
+        local btn = pillBtns[info.id]
+        if btn and btn.Visible then
+            btn.BackgroundColor3 = info.on and COLOR.on or COLOR.titleBar
+            btn.TextColor3 = info.on and COLOR.bg or COLOR.text
+        end
+    end)
+
+    -- Shared flow cursor: everything below the fixed chrome scrolls as a
+    -- single stream, in the order of HUB.pageSections.main.
+    HUB.layout["main"] = pageCanvas(page, 68)
+end
+
+-- CHASE page -------------------------------------------------------------
+do
+    local page = pageFrame("ChasePage")
+    HUB.pages.chase = page
+    UI.label({
+        text = "CHASE", size = UDim2.new(1, -20, 0, 20), position = UDim2.new(0, 10, 0, 6),
+        x = Enum.TextXAlignment.Left, color = COLOR.accent2, textSize = 14, weight = "bold", parent = page,
+    })
+    HUB.layout["chase"] = pageCanvas(page, 30)
+end
+
+-- SETTINGS page ------------------------------------------------------------
+-- Sections + content are built in PART 10 straight into the shared
+-- settings cursor, so content always sits inside its section bounds
+-- (keeps the RED 101 collapsible contract exact).
+do
+    local page = pageFrame("SettingsPage")
+    HUB.pages.settings = page
+    HUB.layout["settings"] = pageCanvas(page, CONFIG.flowPad)
+end
+
+-- EXTRAS page + sub-views (plain frame; sub-views scroll on their own) -----
+do
+    local page = pageFrame("ExtrasPage", false)
+    HUB.pages.extras = page
+
+    local function view(id)
+        local v = Instance.new("ScrollingFrame")
+        v.Name = id
+        v.Size = UDim2.new(1, 0, 1, -53)
+        v.Position = UDim2.new(0, 0, 0, 24)
+        v.BackgroundColor3 = COLOR.bg
+        v.BackgroundTransparency = 1
+        v.BorderSizePixel = 0
+        v.CanvasSize = UDim2.new(0, 0, 0, 1)
+        v.ScrollBarThickness = 6
+        v.Parent = page
+        v.Visible = false
+        return v
+    end
+    HUB.views.console = view("ConsoleView")
+    HUB.views.esp = view("EspView")
+    HUB.views.server = view("ServerView")
+    HUB.views.tp = view("TpView")
+    HUB.views.spd = view("SpdView")
+end
+
+-- Finalize page visibility defaults
+for _, p in pairs(HUB.pages) do
+    if p and p.Visible ~= nil then p.Visible = false end
+end
+-- =====================================================================
+-- PART 9. FEATURES -- modular feature registry
+-- A feature = { id, label, page, build(rows into a page cursor),
+--              commands, keybinds, settingsRows }. The registry renders
+-- each feature into its page's shared flow cursor in the order given by
+-- HUB.pageSections (PART 8), so sections and rows stack sequentially
+-- and can never overlap. Loops live in PART 11 (engine).
+-- =====================================================================
+local function register(def)
+    def.state = def.state or false
+    def.running = false
+    FEATURES[def.id] = def
+    return def
+end
+
+-- Row builders (all take a flow cursor from HUB.layout[page]) -------------
+local function rowToggle(cursor, opts)
+    local row, status, set, get, setCb = UI.toggleRow({
+        text = opts.text, y = cursor.rowY(), parent = cursor.frame, id = opts.id, default = opts.default,
+        onChange = opts.onChange, weight = opts.weight,
+    })
+    return row, set, get, setCb
+end
+
+local function rowSlider(cursor, opts)
+    local ry = cursor.rowY()
+    local row = UI.frame({
+        name = opts.id or "SliderRow", size = UDim2.new(1, -10, 0, 20), position = UDim2.new(0, 5, 0, ry),
+        color = COLOR.bg, parent = cursor.frame, z = 2,
+    })
+    UI.label({
+        text = opts.text, size = UDim2.new(0, 160, 1, 0), position = UDim2.new(0, 10, 0, 0),
+        x = Enum.TextXAlignment.Left, color = COLOR.text, textSize = 12, parent = row,
+    })
+    local s, set, get = UI.slider({
+        size = UDim2.new(0, 150, 0, 20), position = UDim2.new(1, -160, 0, 0), parent = row, z = 3,
+        min = opts.min or 0, max = opts.max or 100, default = opts.default or 0, onChange = opts.onChange,
+    })
+    return s, set, get
+end
+
+local function rowDropdown(cursor, opts)
+    local btn, close, get = UI.dropdown({
+        text = opts.defaultName or (opts.options[1] and opts.options[1].name) or opts.label,
+        size = UDim2.new(1, -10, 0, CONFIG.rowH), position = UDim2.new(0, 5, 0, cursor.rowY()),
+        label = opts.label, options = opts.options, id = opts.id, onChange = opts.onChange,
+        parent = cursor.frame,
+    })
+    return btn, close, get
+end
+
+-- Export row builders so the settings render (PART 10) can reuse them.
+HUB.rowToggle = rowToggle
+HUB.rowSlider = rowSlider
+HUB.rowDropdown = rowDropdown
+
+-- =====================================================================
+-- MOVEMENT (LOCAL PLAYER) -- all render into the shared main cursor
+-- =====================================================================
+register({
+    id = "noclip", label = "Noclip", page = "main",
+    build = function(c)
+        rowToggle(c, { id = "noclip", text = "Noclip", onChange = function(v) engine.noclip.set(v) end })
+    end,
+})
+register({
+    id = "fly", label = "Fly", page = "main",
+    build = function(c)
+        rowToggle(c, { id = "fly", text = "Fly", onChange = function(v) engine.fly.set(v) end })
+        rowSlider(c, { id = "flyspeed", text = "Fly speed", min = 1, max = 100, default = 20, onChange = function(v) engine.fly.setSpeed(v) end })
+    end,
+})
+register({
+    id = "speed", label = "Walk speed", page = "main",
+    build = function(c)
+        rowDropdown(c, { id = "speed", text = "Walk speed", options = SPEED_OPTIONS, onChange = function(opt) engine.speed.set(opt.value) end })
+    end,
+})
+register({
+    id = "jumppower", label = "Jump power", page = "main",
+    build = function(c)
+        rowSlider(c, { id = "jumppower", text = "Jump power", min = 10, max = 250, default = 50, onChange = function(v) engine.jumppower.set(v) end })
+    end,
+})
+register({
+    id = "swim", label = "Swim", page = "main",
+    build = function(c)
+        rowToggle(c, { id = "swim", text = "Swim", onChange = function(v) engine.swim.set(v) end })
+    end,
+})
+register({
+    id = "god", label = "God (auto health)", page = "main",
+    build = function(c)
+        rowToggle(c, { id = "god", text = "God (auto health)", onChange = function(v) engine.god.set(v) end })
+    end,
+})
+register({
+    id = "freecam", label = "Free camera", page = "main",
+    build = function(c)
+        rowToggle(c, { id = "freecam", text = "Free camera", onChange = function(v) engine.freecam.set(v) end })
+    end,
+})
+register({
+    id = "fov", label = "Field of view", page = "main",
+    build = function(c)
+        rowSlider(c, { id = "fov", text = "Field of view", min = 40, max = 140, default = 70, onChange = function(v) engine.fov.set(v) end })
+    end,
+})
+register({
+    id = "antiafk", label = "Anti-AFK", page = "main",
+    build = function(c)
+        rowToggle(c, { id = "antiafk", text = "Anti-AFK", default = true, onChange = function(v) engine.antiafk.set(v) end })
+    end,
+})
+
+-- =====================================================================
+-- CHASE -- three sections, each with its own feature block
+-- =====================================================================
+register({
+    id = "chase-target", label = "Target", page = "chase",
+    build = function(c)
+        rowDropdown(c, { id = "chase-target", text = "Target", options = { { name = "Nearest" }, { name = "Mouse" } }, onChange = function(opt) engine.chase.setTargetMode(opt.name) end })
+    end,
+})
+register({
+    id = "chase-behaviour", label = "Behaviour", page = "chase",
+    build = function(c)
+        rowToggle(c, { id = "chase-enable", text = "Chase on", onChange = function(v) engine.chase.set(v) end })
+        rowToggle(c, { id = "follow-enable", text = "Follow on", onChange = function(v) engine.follow.set(v) end })
+        rowToggle(c, { id = "orbit-enable", text = "Orbit on", onChange = function(v) engine.orbit.set(v) end })
+        rowDropdown(c, { id = "chase-difficulty", text = "Difficulty", options = DIFFICULTY_OPTIONS, onChange = function(opt) engine.chase.setDifficulty(opt) end })
+    end,
+})
+register({
+    id = "chase-movement", label = "Movement", page = "chase",
+    build = function(c)
+        rowSlider(c, { id = "chase-distance", text = "Flee distance", min = 10, max = 80, default = 35, onChange = function(v) engine.chase.setFlee(v) end })
+        rowSlider(c, { id = "chase-speed", text = "Chase speed", min = 5, max = 60, default = 20, onChange = function(v) engine.chase.setSpeed(v) end })
+    end,
+})
+
+-- =====================================================================
+-- AIM ASSIST (settings) -- rows rendered in PART 10
+-- =====================================================================
+register({
+    id = "aim", label = "Aim bot", page = "settings", settings = true,
+    settingsRows = function(c)
+        rowToggle(c, { id = "aim-enable", text = "Aim assist", onChange = function(v) engine.aim.set(v) end })
+        rowToggle(c, { id = "aim-key", text = "Hold key to aim (F)", onChange = function(v) engine.aim.setKeyMode(v) end })
+        rowDropdown(c, { id = "aim-part", text = "Aim part", options = { { name = "Head" }, { name = "Root" } }, onChange = function(opt) engine.aim.setPart(opt.name) end })
+        rowSlider(c, { id = "aim-fov", text = "Aim FOV", min = 5, max = 120, default = 30, onChange = function(v) engine.aim.setFov(v) end })
+    end,
+})
+
+-- =====================================================================
+-- ESP (extras)
+-- =====================================================================
+register({
+    id = "esp", label = "ESP", page = "extras",
+    build = function(view)
+        local c = pageCanvas(view)
+        c.header("ESP", "esp-main")
+        rowToggle(c, { id = "esp-boxes", text = "ESP boxes", default = true })
+        rowToggle(c, { id = "esp-tracers", text = "ESP tracers", default = false })
+        rowToggle(c, { id = "esp-names", text = "ESP names", default = false })
+    end,
+})
+
+-- =====================================================================
+-- SERVER + TP (extras)
+-- =====================================================================
+register({
+    id = "server", label = "Server", page = "extras",
+    build = function(view)
+        local c = pageCanvas(view)
+        c.header("SERVER", "server-info")
+        local y = c.rowY()
+        UI.label({ text = "Place: " .. tostring(game.PlaceId), size = UDim2.new(1, -20, 0, 18), position = UDim2.new(0, 10, 0, y), x = Enum.TextXAlignment.Left, color = COLOR.textDim, textSize = 11, parent = view })
+        UI.label({ text = "Players: " .. tostring(Players.NumPlayers), size = UDim2.new(1, -20, 0, 18), position = UDim2.new(0, 10, 0, y + 20), x = Enum.TextXAlignment.Left, color = COLOR.textDim, textSize = 11, parent = view })
+        c.add(40)
+    end,
+})
+register({
+    id = "tp", label = "Teleport points", page = "extras",
+    build = function(view)
+        local c = pageCanvas(view)
+        c.header("TELEPORT POINTS", "tp-points")
+        local pts = { "Spawn", "Heaven", "Hell", "Mid" }
+        local y = c.rowY()
+        for i, pt in ipairs(pts) do
+            UI.pill({ text = pt, size = UDim2.new(0, 92, 0, CONFIG.rowH), position = UDim2.new(0, 10 + (i - 1) * 100, 0, y), parent = view, onClick = function() engine.teleport.point(pt) end })
+        end
+        c.add(CONFIG.rowH + 4)
+        rowSlider(c, { id = "tp-distance", text = "TP distance (offset)", min = 0, max = 200, default = 0, onChange = function(v) engine.teleport.setOffset(v) end })
+    end,
+})
+
+-- =====================================================================
+-- PLAYERS (main page) -- per-player TP / Tween / Follow / Orbit
+-- Rows flow from the shared main cursor, then advance it, so content
+-- after the list (none today) would stack below without pixel math.
+-- =====================================================================
+local playerRowBase = 0
+local function rebuildPlayers()
+    for _, child in ipairs(HUB.pages.main:GetChildren()) do
+        if child.Name and child.Name:sub(1, 8) == "PlyRow__" then child:Destroy() end
+    end
+    local y = playerRowBase
+    for _, p in ipairs(Players:GetPlayers()) do
+        if p ~= LocalPlayer then
+            local row = UI.frame({
+                name = "PlyRow__" .. p.Name, size = UDim2.new(1, -16, 0, CONFIG.rowH + 2),
+                position = UDim2.new(0, 8, 0, y), color = COLOR.panel, radius = 6, parent = HUB.pages.main, z = 2,
+            })
+            UI.label({ text = p.Name, size = UDim2.new(0, 140, 1, 0), position = UDim2.new(0, 10, 0, 0), x = Enum.TextXAlignment.Left, color = COLOR.text, textSize = 11, parent = row })
+            UI.pill({ text = "TP", size = UDim2.new(0, 30, 0, 22), position = UDim2.new(1, -150, 0.5, -11), parent = row, z = 3, onClick = function() engine.teleport.to(p, false) end })
+            UI.pill({ text = "TWN", size = UDim2.new(0, 38, 0, 22), position = UDim2.new(1, -114, 0.5, -11), parent = row, z = 3, onClick = function() engine.teleport.to(p, true) end })
+            UI.pill({ text = "FLW", size = UDim2.new(0, 38, 0, 22), position = UDim2.new(1, -76, 0.5, -11), parent = row, z = 3, onClick = function() engine.follow.toggleTarget(p) end })
+            UI.pill({ text = "ORB", size = UDim2.new(0, 38, 0, 22), position = UDim2.new(1, -38, 0.5, -11), parent = row, z = 3, onClick = function() engine.orbit.toggleTarget(p) end })
+            y = y + CONFIG.rowH + 2
+        end
+    end
+    local c = HUB.layout["main"]
+    if c and c.reset then c.reset(y) end
+    if HUB.refreshCanvas then HUB.refreshCanvas(HUB.pages.main) end
+end
+register({
+    id = "players", label = "Players", page = "main",
+    build = function(c)
+        local py = c.rowY()
+        UI.pill({ text = "Refresh", size = UDim2.new(0, 80, 0, CONFIG.rowH), position = UDim2.new(0, 6, 0, py), parent = HUB.pages.main, onClick = rebuildPlayers })
+        c.add(CONFIG.rowH + 4)
+        playerRowBase = c.pos()
+        rebuildPlayers()
+    end,
+})
+
+-- =====================================================================
+-- COMMAND / KEYBIND registry hooks (filled in PART 11)
+-- =====================================================================
+FEATURES.commands = FEATURES.commands or {}
+FEATURES.keybinds = FEATURES.keybinds or {}
+function FEATURES.addCommand(name, fn, opts)
+    FEATURES.commands[name] = { fn = fn, desc = opts and opts.desc or name }
+end
+function FEATURES.addKeybind(key, fn, opts)
+    table.insert(FEATURES.keybinds, { key = key, fn = fn, desc = opts and opts.desc or key })
+end
+
+-- Render pages in declared order from the section map ----------------------
+local renderPass = function()
+    for _, pageId in ipairs({ "main", "chase" }) do
+        local c = HUB.layout[pageId]
+        if c then
+            for _, sec in ipairs(HUB.pageSections[pageId] or {}) do
+                c.header(sec.label, sec.id)
+                for _, fid in ipairs(sec.features) do
+                    local f = FEATURES[fid]
+                    if f and f.build then f.build(c) end
+                end
+            end
+        end
+    end
+    -- extras views build their own sections inside their views
+    for _, fid in ipairs({ "esp", "server", "tp" }) do
+        local f = FEATURES[fid]
+        if f and f.build then
+            local target = fid == "esp" and HUB.views.esp or (fid == "server" and HUB.views.server or HUB.views.tp)
+            if target then f.build(target) end
+        end
+    end
+end
+renderPass()
+
+-- expose for boot-time refresh
+HUB.rebuildPlayers = rebuildPlayers
+print("[BASE] part6 ok")
+-- =====================================================================
+-- PART 11. ENGINE -- loops, movement, teleport, chase, aim, commands
+-- Every loop goes through runLoop/stopLoop so stopEverything() and the
+-- UI watchdog are one generic mechanism.
+-- =====================================================================
+local engine = {}
+HUB.engine = engine
+_G.engine = engine
+
+-- ---- loop manager -----------------------------------------------------
+local loops = {}
+local function runLoop(id, fn)
+    if loops[id] then return end
+    loops[id] = RunService.Heartbeat:Connect(function(dt)
+        pcall(fn, dt)
+    end)
+end
+local function stopLoop(id)
+    local c = loops[id]
+    if c then
+        pcall(c.Disconnect, c)
+        loops[id] = nil
+    end
+end
+local function anyLoops()
+    return next(loops) ~= nil
+end
+
+HUB.stopEverything = function()
+    for id in pairs(loops) do stopLoop(id) end
+    if LocalPlayer and LocalPlayer.Character then
+        local hum = LocalPlayer.Character:FindFirstChild("Humanoid")
+        if hum then hum.WalkSpeed = 16 hum.JumpPower = 50 end
+    end
+    if _G.OLDCF then pcall(function() workspace.CurrentCamera.CFrame = _G.OLDCF end) end
+    _G.OLDCF = nil
+    if _G.OLDFOV then pcall(function() workspace.CurrentCamera.FieldOfView = _G.OLDFOV end) end
+    _G.OLDFOV = nil
+    showToast("Stopped all loops", "warn")
+end
+
+-- ---- helpers ----------------------------------------------------------
+local function char()
+    return LocalPlayer and LocalPlayer.Character
+end
+local function hrp()
+    local c = char()
+    return c and c:FindFirstChild("HumanoidRootPart")
+end
+local function hum()
+    local c = char()
+    return c and c:FindFirstChildOfClass("Humanoid")
+end
+
+-- =====================================================================
+-- NOCLIP
+-- =====================================================================
+engine.noclip = {
+    set = function(v)
+        if v then
+            runLoop("noclip", function()
+                local root = hrp()
+                local p = root and root.Position
+                if root and p then
+                    for _, part in ipairs(char():GetChildren()) do
+                        if part:IsA("BasePart") and part.CanCollide then
+                            part.CanCollide = false
+                        end
+                    end
+                end
+            end)
+        else
+            stopLoop("noclip")
+        end
+        showToast(v and "Noclip on" or "Noclip off", v and "on" or "textDim")
+    end,
+}
+
+-- =====================================================================
+-- FLY
+-- =====================================================================
+engine.fly = {
+    speed = 20,
+    setSpeed = function(v)
+        engine.fly.speed = v
+        showToast("Fly speed: " .. tostring(v), "accent")
+    end,
+    set = function(v)
+        if v then
+            runLoop("fly", function(dt)
+                dt = dt or 0.05
+                local root = hrp()
+                local h = hum()
+                if not root or not h then return end
+                local cam = workspace.CurrentCamera
+                local cf = cam and cam.CFrame or CFrame.new(0, 5, 0)
+                local forward = (cf.LookVector * Vector3.new(1, 0, 1)).Unit
+                local right = (cf.RightVector * Vector3.new(1, 0, 1)).Unit
+                local speed = engine.fly.speed
+                local keys = UserInputService:GetKeyboardState()
+                local vel = Vector3.new(0, 0, 0)
+                if keys[Enum.KeyCode.W] then vel = vel + forward * speed end
+                if keys[Enum.KeyCode.S] then vel = vel - forward * speed end
+                if keys[Enum.KeyCode.A] then vel = vel - right * speed end
+                if keys[Enum.KeyCode.D] then vel = vel + right * speed end
+                if keys[Enum.KeyCode.Space] then vel = vel + Vector3.new(0, speed * 0.8, 0) end
+                if keys[Enum.KeyCode.LeftShift] then vel = vel - Vector3.new(0, speed * 0.8, 0) end
+                root.Velocity = Vector3.new(vel.X, vel.Y * 0.4, vel.Z)
+                root.CFrame = root.CFrame + vel * dt
+            end)
+        else
+            stopLoop("fly")
+            local root = hrp()
+            if root then root.Velocity = Vector3.new(0, 0, 0) end
+        end
+        showToast(v and "Fly on" or "Fly off", v and "on" or "textDim")
+    end,
+}
+
+-- =====================================================================
+-- SWIM / SPEED / JUMP POWER
+-- =====================================================================
+engine.swim = {
+    set = function(v)
+        local h = hum()
+        if h then
+            if v then
+                _G.OLDSWIM = h.SwimSpeed
+                h.SwimSpeed = engine.fly.speed
+            else
+                h.SwimSpeed = _G.OLDSWIM or 17
+            end
+        end
+        showToast(v and "Swim on" or "Swim off", v and "on" or "textDim")
+    end,
+}
+engine.speed = {
+    set = function(v)
+        local h = hum()
+        if h then h.WalkSpeed = v end
+        showToast("Walk speed: " .. tostring(v), "accent")
+    end,
+}
+engine.jumppower = {
+    set = function(v)
+        local h = hum()
+        if h then h.JumpPower = v end
+        showToast("Jump power: " .. tostring(v), "accent")
+    end,
+}
+
+-- =====================================================================
+-- GOD
+-- =====================================================================
+engine.god = {
+    set = function(v)
+        if v then
+            runLoop("god", function()
+                local h = hum()
+                if h then h.Health = h.MaxHealth end
+            end)
+        else
+            stopLoop("god")
+        end
+        showToast(v and "God on" or "God off", v and "on" or "textDim")
+    end,
+}
+
+-- =====================================================================
+-- FREE CAM
+-- =====================================================================
+engine.freecam = {
+    set = function(v)
+        local cam = workspace.CurrentCamera
+        if v then
+            _G.OLDCF = cam.CFrame
+            cam.CameraType = Enum.CameraType.Scriptable
+            runLoop("freecam", function(dt)
+                local speed = 60
+                local k = UserInputService:GetKeyboardState()
+                local fwd = (k[Enum.KeyCode.W] and 1 or 0) - (k[Enum.KeyCode.S] and 1 or 0)
+                local str = (k[Enum.KeyCode.D] and 1 or 0) - (k[Enum.KeyCode.A] and 1 or 0)
+                local up = (k[Enum.KeyCode.Space] and 1 or 0) - (k[Enum.KeyCode.LeftShift] and 1 or 0)
+                local cf = cam.CFrame
+                cam.CFrame = cf + cf.LookVector * fwd * speed * dt + cf.RightVector * str * speed * dt + Vector3.new(0, up * speed * dt, 0)
+            end)
+        else
+            stopLoop("freecam")
+            cam.CameraType = Enum.CameraType.Custom
+            cam.CFrame = _G.OLDCF or cam.CFrame
+            _G.OLDCF = nil
+        end
+        showToast(v and "Free cam on" or "Free cam off", v and "on" or "textDim")
+    end,
+}
+
+-- =====================================================================
+-- FOV
+-- =====================================================================
+engine.fov = {
+    set = function(v)
+        local cam = workspace.CurrentCamera
+        if cam then cam.FieldOfView = v end
+        showToast("FOV: " .. tostring(v), "accent")
+    end,
+}
+
+-- =====================================================================
+-- ANTI-AFK
+-- =====================================================================
+engine.antiafk = {
+    set = function(v)
+        if v then
+            runLoop("antiafk", function()
+                local c = char()
+                local root = hrp()
+                if root then root.Velocity = root.Velocity end
+                local h = hum()
+                if h and not h.PlatformStand then
+                    local p = root and root.Position
+                    if p then
+                        task.wait(0.5)
+                        root.CFrame = CFrame.new(p + Vector3.new(0.001, 0, 0))
+                    end
+                end
+            end)
+        else
+            stopLoop("antiafk")
+        end
+        showToast(v and "Anti-AFK on" or "Anti-AFK off", v and "on" or "textDim")
+    end,
+}
+
+-- =====================================================================
+-- TELEPORT
+-- =====================================================================
+engine.teleport = {
+    offset = 0,
+    style = "instant",
+    setOffset = function(v)
+        engine.teleport.offset = v
+        showToast("TP offset: " .. tostring(v), "accent")
+    end,
+    to = function(target, tweenMode)
+        local root = hrp()
+        if not root then showToast("No character", "warn") return end
+        local tChar = target.Character or (target.Name and workspace:FindFirstChild(target.Name))
+        local tRoot = tChar and tChar:FindFirstChild("HumanoidRootPart")
+        if not tRoot then showToast("No target root", "warn") return end
+        local pos = tRoot.Position + Vector3.new(engine.teleport.offset, 3, 0)
+        if tweenMode then
+            local t = TweenService:Create(root, TweenInfo.new(0.35), { CFrame = CFrame.new(pos) })
+            t:Play()
+        else
+            root.CFrame = CFrame.new(pos)
+        end
+        EVENTS.fire("teleport", { target = target.Name })
+        showToast("Teleported to " .. target.Name, "accent")
+    end,
+    point = function(pt)
+        local root = hrp()
+        if not root then showToast("No character", "warn") return end
+        local c = char()
+        if not c then return end
+        -- simple named points derived from the map origin
+        local spawn = workspace:FindFirstChild("SpawnLocation")
+        local origin = spawn and spawn.Position or Vector3.new(0, 0, 0)
+        local map = {
+            Spawn = origin + Vector3.new(0, 5, 0),
+            Heaven = origin + Vector3.new(0, 500, 0),
+            Hell = origin + Vector3.new(0, -500, 0),
+            Mid = origin + Vector3.new(0, 5, -100),
+        }
+        local pos = map[pt] or origin
+        root.CFrame = CFrame.new(pos)
+        EVENTS.fire("teleport", { target = pt })
+        showToast("TP to " .. pt, "accent")
+    end,
+}
+
+-- =====================================================================
+-- FOLLOW
+-- =====================================================================
+engine.follow = {
+    target = nil,
+    set = function(v)
+        if v then
+            if not engine.follow.target then engine.follow.target = UTIL.nearest(Players:GetPlayers(), function(p)
+                local c = p.Character
+                local r = c and c:FindFirstChild("HumanoidRootPart")
+                local my = hrp()
+                return r and my and (r.Position - my.Position).Magnitude or math.huge
+            end) end
+            runLoop("follow", function(dt)
+                local root = hrp()
+                local t = engine.follow.target
+                local tChar = t and (t.Character or workspace:FindFirstChild(t.Name))
+                local tRoot = tChar and tChar:FindFirstChild("HumanoidRootPart")
+                if root and tRoot then
+                    local dir = (tRoot.Position - root.Position).Unit
+                    root.CFrame = CFrame.new(root.Position + dir * CONFIG.followSpeed * dt)
+                end
+            end)
+        else
+            stopLoop("follow")
+        end
+        local tName = engine.follow.target and engine.follow.target.Name or "?"
+        showToast(v and ("Following " .. tName) or "Follow off", v and "on" or "textDim")
+        EVENTS.fire("toggle", { id = "follow-enable", on = v, label = "Follow on" })
+        if HUB.toggleSets and HUB.toggleSets["follow-enable"] then
+            pcall(HUB.toggleSets["follow-enable"].set, v, true)
+        end
+    end,
+    toggleTarget = function(p)
+        engine.follow.target = p
+        if loops["follow"] then stopLoop("follow") runLoop("follow", function(dt)
+            local root = hrp()
+            local tChar = p.Character or workspace:FindFirstChild(p.Name)
+            local tRoot = tChar and tChar:FindFirstChild("HumanoidRootPart")
+            if root and tRoot then
+                local dir = (tRoot.Position - root.Position).Unit
+                root.CFrame = CFrame.new(root.Position + dir * CONFIG.followSpeed * dt)
+            end
+        end) end
+        showToast("Following " .. p.Name, "accent")
+    end,
+}
+
+-- =====================================================================
+-- ORBIT
+-- =====================================================================
+engine.orbit = {
+    target = nil,
+    set = function(v)
+        if v then
+            if not engine.orbit.target then
+                engine.orbit.target = UTIL.nearest(Players:GetPlayers(), function(p)
+                    local c = p.Character
+                    local r = c and c:FindFirstChild("HumanoidRootPart")
+                    local my = hrp()
+                    return r and my and (r.Position - my.Position).Magnitude or math.huge
+                end)
+            end
+            runLoop("orbit", function(dt)
+                local root = hrp()
+                local t = engine.orbit.target
+                local tChar = t and (t.Character or workspace:FindFirstChild(t.Name))
+                local tRoot = tChar and tChar:FindFirstChild("HumanoidRootPart")
+                if root and tRoot then
+                    local tPos = tRoot.Position
+                    local myPos = root.Position
+                    local diff = (myPos - tPos) * Vector3.new(1, 0, 1)
+                    if diff.Magnitude < 1 then diff = Vector3.new(1, 0, 0) end
+                    local orbitPos = tPos + (diff.Unit * 12 + Vector3.new(0, 5, 0))
+                    root.CFrame = CFrame.new(orbitPos)
+                    root.CFrame = CFrame.lookAt(root.Position, tPos)
+                end
+            end)
+        else
+            stopLoop("orbit")
+        end
+        showToast(v and ("Orbiting " .. tostring(engine.orbit.target and engine.orbit.target.Name or "?") or "Orbit off"), v and "on" or "textDim")
+        EVENTS.fire("toggle", { id = "orbit-enable", on = v, label = "Orbit on" })
+        if HUB.toggleSets and HUB.toggleSets["orbit-enable"] then
+            pcall(HUB.toggleSets["orbit-enable"].set, v, true)
+        end
+    end,
+    toggleTarget = function(p)
+        engine.orbit.target = p
+        if loops["orbit"] then stopLoop("orbit") engine.orbit.set(true) end
+        showToast("Orbiting " .. p.Name, "accent")
+    end,
+}
+
+-- =====================================================================
+-- CHASE
+-- =====================================================================
+engine.chase = {
+    on = false,
+    mode = "Nearest",
+    difficulty = DIFFICULTY_OPTIONS[1],
+    flee = 35,
+    speed = 20,
+    setTargetMode = function(m) engine.chase.mode = m end,
+    setDifficulty = function(opt) engine.chase.difficulty = opt end,
+    setFlee = function(v) engine.chase.flee = v end,
+    setSpeed = function(v) engine.chase.speed = v end,
+    set = function(v)
+        engine.chase.on = v
+        if v then
+            runLoop("chase", function(dt)
+                local root = hrp()
+                if not root then return end
+                local t = engine.chase.pickTarget()
+                local tChar = t and (t.Character or workspace:FindFirstChild(t.Name))
+                local tRoot = tChar and tChar:FindFirstChild("HumanoidRootPart")
+                if not tRoot then return end
+                local dist = (tRoot.Position - root.Position).Magnitude
+                local d = engine.chase.difficulty
+                if dist < d.fleeDistance then
+                    local dir = (root.Position - tRoot.Position).Unit * Vector3.new(1, 0, 1)
+                    root.CFrame = CFrame.new(root.Position + (dir * d.speed * dt))
+                    EVENTS.fire("chase", { state = "flee", dist = dist })
+                else
+                    local dir = (tRoot.Position - root.Position).Unit * Vector3.new(1, 0, 1)
+                    root.CFrame = CFrame.new(root.Position + (dir * engine.chase.speed * dt))
+                    EVENTS.fire("chase", { state = "chase", dist = dist })
+                end
+            end)
+        else
+            stopLoop("chase")
+        end
+        EVENTS.fire("chase", { state = v and "start" or "stop" })
+        EVENTS.fire("toggle", { id = "chase-enable", on = v, label = "Chase on" })
+        if HUB.toggleSets and HUB.toggleSets["chase-enable"] then
+            pcall(HUB.toggleSets["chase-enable"].set, v, true)
+        end
+        showToast(v and "Chase on" or "Chase off", v and "on" or "textDim")
+    end,
+    pickTarget = function()
+        local my = hrp()
+        if not my then return nil end
+        local best, bestD = nil, math.huge
+        for _, p in ipairs(Players:GetPlayers()) do
+            if p ~= LocalPlayer then
+                local c = p.Character
+                local r = c and c:FindFirstChild("HumanoidRootPart")
+                if r then
+                    local d = (r.Position - my.Position).Magnitude
+                    if d < bestD then best, bestD = p, d end
+                end
+            end
+        end
+        return best
+    end,
+}
+
+-- =====================================================================
+-- AIM ASSIST
+-- =====================================================================
+engine.aim = {
+    on = false,
+    keyMode = false,
+    part = "Head",
+    fov = 30,
+    set = function(v)
+        engine.aim.on = v
+        showToast(v and "Aim assist on" or "Aim assist off", v and "on" or "textDim")
+        EVENTS.fire("toggle", { id = "aim-enable", on = v, label = "Aim assist" })
+        if HUB.toggleSets and HUB.toggleSets["aim-enable"] then
+            pcall(HUB.toggleSets["aim-enable"].set, v, true)
+        end
+    end,
+    setKeyMode = function(v) engine.aim.keyMode = v end,
+    setPart = function(name) engine.aim.part = name end,
+    setFov = function(v) engine.aim.fov = v end,
+}
+local function aimTick()
+    if not engine.aim.on then return end
+    if engine.aim.keyMode and not UserInputService:IsKeyDown(Enum.KeyCode.F) then return end
+    local cam = workspace.CurrentCamera
+    local myRoot = hrp()
+    if not cam or not myRoot then return end
+    local best, bestA = nil, engine.aim.fov
+    for _, p in ipairs(Players:GetPlayers()) do
+        if p ~= LocalPlayer then
+            local c = p.Character
+            local part = c and c:FindFirstChild(engine.aim.part) or (c and c:FindFirstChild("Head"))
+            if part then
+                local sp = cam:WorldToScreenPoint(part.Position)
+                local mousePos = UserInputService:GetMouseLocation()
+                local dx, dy = sp.X - mousePos.X, sp.Y - mousePos.Y
+                local ang = math.sqrt(dx * dx + dy * dy)
+                if ang < bestA then best, bestA = part, ang end
+            end
+        end
+    end
+    if best then
+        cam.CFrame = CFrame.lookAt(cam.CFrame.Position, best.Position)
+    end
+end
+RunService.RenderStepped:Connect(aimTick)
+
+-- =====================================================================
+-- COMMANDS
+-- =====================================================================
+local commandList = {}
+-- Map command names to { featureId, toggleState } so addcmd can sync
+-- the UI toggle after the engine fires.
+local cmdToggleMap = {}
+
+function addcmd(name, args)
+    name = tostring(name):lower()
+    if commandList[name] then
+        local ok, err = pcall(commandList[name].fn, args)
+        if not ok then
+            showToast("Command error: " .. tostring(err), "error")
+            EVENTS.fire("error", err)
+        end
+        -- Sync the UI toggle (if one exists) so pill/keybind clicks
+        -- update the visual switch, not just the engine state.
+        local map = cmdToggleMap[name]
+        if map and HUB.toggleSets and HUB.toggleSets[map.id] then
+            HUB.toggleSets[map.id].set(map.state, true)
+        end
+    else
+        showToast("Unknown command: " .. name ..  " (try /help)", "warn")
+    end
+end
+
+local function cmd(name, fn, desc, featureId, featureState)
+    commandList[name] = { fn = fn, desc = desc or name }
+    if featureId and featureState ~= nil then
+        cmdToggleMap[name] = { id = featureId, state = featureState }
+    end
+end
+
+-- movement commands (featureId + state so addcmd syncs the toggle UI)
+cmd("noclip", function() engine.noclip.set(true) end, "Toggles noclip", "noclip", true)
+cmd("clip", function() engine.noclip.set(false) end, "Toggles noclip off", "noclip", false)
+cmd("fly", function() engine.fly.set(true) end, "Toggles fly", "fly", true)
+cmd("unfly", function() engine.fly.set(false) end, "Toggles fly off", "fly", false)
+cmd("flyspeed", function(a)
+    local n = tonumber(a)
+    if n then engine.fly.setSpeed(n) end
+end, "flyspeed <n> - set fly speed")
+cmd("swim", function() engine.swim.set(true) end, "Toggles swim", "swim", true)
+cmd("unswim", function() engine.swim.set(false) end, "Toggles swim off", "swim", false)
+cmd("speed", function(a)
+    local n = tonumber(a)
+    if n then engine.speed.set(n) end
+end, "speed <n> - set walk speed")
+cmd("jumppower", function(a)
+    local n = tonumber(a)
+    if n then engine.jumppower.set(n) end
+end, "jumppower <n> - set jump power")
+cmd("god", function() engine.god.set(true) end, "Toggles god", "god", true)
+cmd("ungod", function() engine.god.set(false) end, "Toggles god off", "god", false)
+cmd("freecam", function() engine.freecam.set(true) end, "Toggles free cam", "freecam", true)
+cmd("unfreecam", function() engine.freecam.set(false) end, "Toggles free cam off", "freecam", false)
+cmd("fov", function(a)
+    local n = tonumber(a)
+    if n then engine.fov.set(n) end
+end, "fov <n> - set field of view")
+cmd("antiafk", function(a)
+    local v = a == nil or (a ~= "off" and a ~= "0")
+    engine.antiafk.set(v)
+end, "antiafk - toggles anti-afk", "antiafk", true)
+
+-- teleport commands
+cmd("goto", function(a)
+    if not a or a == "" then showToast("goto <name>", "warn") return end
+    local p = Players:FindFirstChild(a)
+    if p then engine.teleport.to(p, false)
+    else showToast("No player named " .. a, "warn") end
+end, "goto <name> - teleport to player")
+cmd("tweengoto", function(a)
+    if not a or a == "" then showToast("tweengoto <name>", "warn") return end
+    local p = Players:FindFirstChild(a)
+    if p then engine.teleport.to(p, true)
+    else showToast("No player named " .. a, "warn") end
+end, "tweengoto <name> - smooth teleport to player")
+cmd("tppos", function(a)
+    local x, y, z = a:match("([%d%-%.]+)%s+([%d%-%.]+)%s+([%d%-%.]+)")
+    if x then
+        local root = hrp()
+        if root then root.CFrame = CFrame.new(tonumber(x), tonumber(y), tonumber(z)) end
+    end
+end, "tppos <x> <y> <z> - teleport to position")
+cmd("offset", function(a)
+    local n = tonumber(a)
+    if n then engine.teleport.setOffset(n) end
+end, "offset <n> - set tp offset")
+cmd("respawn", function()
+    local h = hum()
+    if h then h.Health = 0 end
+    showToast("Respawning", "warn")
+end, "respawn - reset character")
+
+-- utility commands
+cmd("notify", function(a)
+    showToast(a or "Hello from BASE", "accent")
+end, "notify <msg> - send a toast")
+cmd("help", function()
+    local names = {}
+    for name in pairs(commandList) do names[#names + 1] = name end
+    table.sort(names)
+    showToast("Commands: " .. table.concat(names, ", "), "textDim")
+end, "help - list commands")
+cmd("stop", function() HUB.stopEverything() end, "stop - stop all loops")
+cmd("remotes", function() showToast("Remote spy placeholder", "textDim") end, "remotes - list remotes")
+cmd("spy", function() showToast("Remote spy placeholder", "textDim") end, "spy - toggle remote spy")
+cmd("fire", function(a) showToast("fire <remote> placeholder", "textDim") end, "fire <remote> - fire remote")
+cmd("stats", function()
+    local p = LocalPlayer
+    if p then showToast(p.Name .. ": leaderstats placeholder", "textDim") end
+end, "stats - show stats")
+cmd("setstat", function(a)
+    showToast("setstat <stat> <value> placeholder", "textDim")
+end, "setstat <stat> <value> - set a stat")
+cmd("statwatch", function(a)
+    showToast("statwatch <stat> placeholder", "textDim")
+end, "statwatch <stat> - watch a stat")
+
+-- feature commands
+cmd("chase", function(a) engine.chase.set(a ~= "off") end, "chase - toggle chase", "chase-enable", true)
+cmd("unchase", function() engine.chase.set(false) end, "unchase - stop chase", "chase-enable", false)
+cmd("follow", function(a)
+    if a and a ~= "" then
+        local p = Players:FindFirstChild(a)
+        if p then engine.follow.toggleTarget(p) return end
+    end
+    engine.follow.set(true)
+end, "follow [name] - follow a player")
+cmd("unfollow", function() engine.follow.set(false) end, "unfollow - stop following")
+cmd("orbit", function(a)
+    if a and a ~= "" then
+        local p = Players:FindFirstChild(a)
+        if p then engine.orbit.toggleTarget(p) return end
+    end
+    engine.orbit.set(true)
+end, "orbit [name] - orbit a player")
+cmd("unorbit", function() engine.orbit.set(false) end, "unorbit - stop orbiting")
+cmd("esp", function(a) showToast("esp toggled (extras page)", "textDim") end, "esp - toggle ESP")
+cmd("aim", function(a) engine.aim.set(a ~= "off") end, "aim - toggle aim assist")
+cmd("fling", function(a) showToast("fling placeholder", "textDim") end, "fling - fling a player")
+
+-- fling stop (kept for closeAndStop + parity)
+function FlingStop()
+end
+
+-- =====================================================================
+-- execCmd -- the terminal / chain engine
+-- chains split on "\", each segment trimmed then dispatched
+-- =====================================================================
+function execCmd(text)
+    if type(text) ~= "string" or text == "" then return end
+    local parts = UTIL.split(text, "\\", true)
+    for _, part in ipairs(parts) do
+        local p = part:gsub("^%s+", ""):gsub("%s+$", "")
+        if p ~= "" then
+            local name, args = p:match("^(%S+)%s*(.*)$")
+            name = (name or p):lower()
+            args = args or ""
+            if name == "tppos" then
+                addcmd(name, args)
+            else
+                addcmd(name, args)
+            end
+            EVENTS.fire("command", { name = name, args = args })
+        end
+    end
+end
+
+-- expose commands for the harness contract
+HUB.commands = commandList
+print("[BASE] part7 ok")
+-- =====================================================================
+-- PART 10. SETTINGS + FACE CUSTOMIZATION
+-- Builds the 8 look sections (v7 parity), the feature settings sections
+-- from the registry (AIM BOT etc.), and the NOVA customization panel.
+-- Content always sits inside its section bounds (RED 101 contract).
+-- =====================================================================
+local sc = HUB.layout["settings"]
+local RT = HUB.rowToggle
+local RS = HUB.rowSlider
+local RD = HUB.rowDropdown
+
+local function presetRow(cursor, presets, onPick, pillW)
+    pillW = pillW or 74
+    local ry = cursor.rowY()
+    for i, pr in ipairs(presets) do
+        UI.pill({
+            text = pr.name, size = UDim2.new(0, pillW, 0, CONFIG.rowH),
+            position = UDim2.new(0, 6 + (i - 1) * (pillW + 6), 0, ry),
+            parent = cursor.frame, colorRole = i == 1 and "accent2" or nil,
+            onClick = function() onPick(pr) end,
+        })
+    end
+    cursor.add(CONFIG.rowH + 4)
+end
+
+-- 1. HUB SIZE
+sc.header("HUB SIZE", "hub-size")
+presetRow(sc, HUB.PRESETS.sizes, function(pr)
+    HUB.applySize(pr)
+    showToast("Size: " .. pr.name, "accent")
+end)
+
+-- 2. TEXT SCALE
+sc.header("TEXT SCALE", "text-scale")
+presetRow(sc, HUB.PRESETS.textScales, function(pr)
+    HUB.applyTextPreset(pr)
+    showToast("Text scale: " .. pr.name, "accent")
+end)
+
+-- 3. WINDOW SIZE
+sc.header("WINDOW SIZE", "window-size")
+RS(sc, {
+    id = "win-w", text = "Window width", min = CONFIG.winMinW, max = 800, default = HUB.winW,
+    onChange = function(v)
+        HUB.frame.Size = UDim2.new(0, v, 0, HUB.frame.Size.Y.Offset)
+        HUB.winW = v
+    end,
+})
+RS(sc, {
+    id = "win-h", text = "Window height", min = CONFIG.winMinH, max = 700, default = HUB.winH,
+    onChange = function(v)
+        HUB.frame.Size = UDim2.new(0, HUB.winW, 0, v)
+        HUB.winH = v
+    end,
+})
+UI.pill({
+    text = "Reset window", size = UDim2.new(0, 110, 0, CONFIG.rowH),
+    position = UDim2.new(0, 6, 0, sc.rowY()), parent = sc.frame,
+    onClick = function()
+        HUB.frame.Size = UDim2.new(0, CONFIG.winW, 0, CONFIG.winH)
+        HUB.winW = CONFIG.winW
+        HUB.winH = CONFIG.winH
+    end,
+})
+sc.add(CONFIG.rowH + 4)
+
+-- 4. FONT
+sc.header("FONT", "font")
+presetRow(sc, HUB.PRESETS.fonts, function(pr)
+    HUB.applyFont(pr)
+    showToast("Font: " .. pr.name, "accent")
+end)
+
+-- 5. BORDER EDGING
+sc.header("BORDER EDGING", "border-edging")
+presetRow(sc, HUB.PRESETS.borders, function(pr)
+    HUB.applyBorderStyle(pr)
+    showToast("Edging: " .. pr.name, "accent")
+end)
+
+-- 6. EDGING FILTER
+sc.header("EDGING FILTER", "edging-filter")
+presetRow(sc, HUB.PRESETS.filters, function(pr)
+    HUB.applyEdgingFilter(pr)
+    showToast("Edging filter: " .. pr.name, "accent")
+end)
+
+-- 7. UI PRESETS
+sc.header("UI PRESETS", "ui-presets")
+local saved = HUB.PRESETS.imported
+UI.pill({
+    text = "Save current look", size = UDim2.new(0, 130, 0, CONFIG.rowH),
+    position = UDim2.new(0, 6, 0, sc.rowY()), parent = sc.frame, colorRole = "accent",
+    onClick = function()
+        saved[1] = {
+            theme = HUB.currentTheme,
+            font = currentFontPreset,
+            size = currentSizePreset,
+            text = currentTextPreset,
+            border = currentBorderPreset,
+            filter = currentEdgingFilter,
+        }
+        showToast("UI preset saved", "on")
+    end,
+})
+UI.pill({
+    text = "Apply saved", size = UDim2.new(0, 110, 0, CONFIG.rowH),
+    position = UDim2.new(0, 142, 0, sc.rowY()), parent = sc.frame,
+    onClick = function()
+        local p = saved[1]
+        if p then
+            if p.theme then HUB.applyTheme(p.theme) end
+            if p.font then HUB.applyFont(p.font) end
+            if p.size then HUB.applySize(p.size) end
+            if p.text then HUB.applyTextPreset(p.text) end
+            if p.border then HUB.applyBorderStyle(p.border) end
+            if p.filter then HUB.applyEdgingFilter(p.filter) end
+            showToast("UI preset applied", "on")
+        else
+            showToast("No saved preset yet", "warn")
+        end
+    end,
+})
+sc.add(CONFIG.rowH + 4)
+
+-- 8. THEME
+sc.header("THEME", "theme")
+presetRow(sc, HUB.PRESETS.themes, function(pr)
+    HUB.applyTheme(pr)
+    showToast("Theme: " .. pr.name, "accent")
+end)
+
+-- Feature settings sections (AIM BOT, ...) from the registry
+for _, f in pairs(FEATURES) do
+    if type(f) == "table" and f.settings and f.settingsRows then
+        sc.header(f.label, f.id)
+        f.settingsRows(sc)
+    end
+end
+
+-- =====================================================================
+-- VERITY customization panel (modular 2D mascot)
+-- Hair off by default, layers: Head/Hair/Eyes/Brows/Mouth/Effects
+-- =====================================================================
+sc.header("VERITY", "verity-custom")
+RT(sc, {
+    id = "verity-hair", text = "Hair (stylized clumps)", default = false,
+    onChange = function(v)
+        VERITY.setHair(v)
+        FACE.setHair(v)
+        showToast(v and "Hair on" or "Hair off", "accent")
+    end,
+})
+RD(sc, {
+    id = "face-shape", label = "Eye shape",
+    options = { { name = "Round" }, { name = "Narrow" }, { name = "Wide" }, { name = "Sharp" } },
+    defaultName = "Round",
+    onChange = function(opt)
+        FACE.opts.shape = opt.name:lower()
+        FACE.apply()
+        showToast("Eye shape: " .. opt.name, "accent")
+    end,
+})
+RD(sc, {
+    id = "face-pupil", label = "Pupil",
+    options = { { name = "Dot" }, { name = "Slit" }, { name = "Star" } },
+    defaultName = "Dot",
+    onChange = function(opt)
+        FACE.opts.pupil = opt.name:lower()
+        FACE.apply()
+        showToast("Pupil: " .. opt.name, "accent")
+    end,
+})
+RD(sc, {
+    id = "face-blink", label = "Blink style",
+    options = { { name = "Natural" }, { name = "Quick" }, { name = "Slow" }, { name = "Heavy" } },
+    defaultName = "Natural",
+    onChange = function(opt)
+        FACE.opts.blinkStyle = opt.name:lower()
+        showToast("Blink: " .. opt.name, "accent")
+    end,
+})
+RD(sc, {
+    id = "face-expression", label = "Expression",
+    options = {
+        { name = "Neutral" }, { name = "Focused" }, { name = "Curious" }, { name = "Amused" },
+        { name = "Annoyed" }, { name = "Alert" }, { name = "Glitch" },
+    },
+    defaultName = "Neutral",
+    onChange = function(opt)
+        FACE.opts.expression = opt.name:lower()
+        FACE.set(FACE.opts.expression, "custom")
+        showToast("Expression: " .. opt.name, "accent")
+    end,
+})
+RS(sc, {
+    id = "face-size", text = "Eye size", min = 60, max = 140, default = 100,
+    onChange = function(v)
+        FACE.opts.size = v / 100
+        FACE.apply()
+    end,
+})
+RT(sc, {
+    id = "face-reacts", text = "React to actions", default = true,
+    onChange = function(v) FACE.opts.reactsTo = v end,
+})
+RT(sc, {
+    id = "face-follows", text = "Eyes follow cursor", default = true,
+    onChange = function(v) FACE.opts.follows = v end,
+})
+RT(sc, {
+    id = "face-animations", text = "Idle animations", default = true,
+    onChange = function(v) FACE.opts.animations = v end,
+})
+
+-- eye colour swatches
+UI.label({
+    text = "Eye colour", size = UDim2.new(0, 120, 0, 20), position = UDim2.new(0, 10, 0, sc.rowY()),
+    x = Enum.TextXAlignment.Left, color = COLOR.textDim, textSize = 11, parent = sc.frame,
+})
+sc.add(20)
+local eyeColors = {
+    { name = "Ice", c = Color3.fromRGB(120, 200, 255) },
+    { name = "Gold", c = Color3.fromRGB(250, 200, 90) },
+    { name = "Rose", c = Color3.fromRGB(255, 120, 140) },
+    { name = "Violet", c = Color3.fromRGB(170, 120, 255) },
+    { name = "Lime", c = Color3.fromRGB(150, 255, 120) },
+    { name = "Ember", c = Color3.fromRGB(255, 90, 60) },
+}
+local ry = sc.rowY()
+for i, e in ipairs(eyeColors) do
+    UI.pill({
+        text = e.name, size = UDim2.new(0, 74, 0, CONFIG.rowH), position = UDim2.new(0, 6 + (i - 1) * 80, 0, ry),
+        parent = sc.frame, color = e.c, textColor = Color3.fromRGB(10, 10, 14), textSize = 10,
+        onClick = function()
+            FACE.opts.color = e.c
+            FACE.apply()
+            showToast("Eye colour: " .. e.name, "accent")
+        end,
+    })
+end
+sc.add(CONFIG.rowH + 6)
+
+-- pupil colour swatches
+UI.label({
+    text = "Pupil colour", size = UDim2.new(0, 120, 0, 20), position = UDim2.new(0, 10, 0, sc.rowY()),
+    x = Enum.TextXAlignment.Left, color = COLOR.textDim, textSize = 11, parent = sc.frame,
+})
+sc.add(20)
+local pupilColors = {
+    { name = "Dark", c = Color3.fromRGB(20, 24, 34) },
+    { name = "Black", c = Color3.fromRGB(0, 0, 0) },
+    { name = "White", c = Color3.fromRGB(255, 255, 255) },
+    { name = "Red", c = Color3.fromRGB(255, 60, 60) },
+}
+ry = sc.rowY()
+for i, e in ipairs(pupilColors) do
+    UI.pill({
+        text = e.name, size = UDim2.new(0, 88, 0, CONFIG.rowH), position = UDim2.new(0, 6 + (i - 1) * 94, 0, ry),
+        parent = sc.frame, color = e.c, textColor = e.c.R + e.c.G + e.c.B > 1.2 and Color3.fromRGB(10, 10, 14) or Color3.fromRGB(240, 240, 240), textSize = 10,
+        onClick = function()
+            FACE.opts.pupilColor = e.c
+            FACE.apply()
+            showToast("Pupil colour: " .. e.name, "accent")
+        end,
+    })
+end
+sc.add(CONFIG.rowH + 6)
+
+-- Verity states quick test
+UI.pill({
+    text = "Test Glitch", size = UDim2.new(0, 110, 0, CONFIG.rowH),
+    position = UDim2.new(0, 6, 0, sc.rowY()), parent = sc.frame, colorRole = "accent2",
+    onClick = function() VERITY.set("glitch","test"); task.delay(0.6,function() VERITY.set("neutral","test") end) end,
+})
+UI.pill({
+    text = "Neutral", size = UDim2.new(0, 90, 0, CONFIG.rowH),
+    position = UDim2.new(0, 122, 0, sc.rowY()), parent = sc.frame,
+    onClick = function() VERITY.set("neutral","test") end,
+})
+sc.add(CONFIG.rowH+4)
+-- Reset Verity
+UI.pill({
+    text = "Reset Verity", size = UDim2.new(0, 120, 0, CONFIG.rowH),
+    position = UDim2.new(0, 6, 0, sc.rowY()), parent = sc.frame, colorRole = "warn",
+    onClick = function()
+        for k, v in pairs(FACE_DEFAULTS) do FACE.opts[k] = v end
+        VERITY.setHair(false)
+        FACE.apply()
+        FACE.set("neutral", "reset")
+        showToast("Verity reset", "textDim")
+    end,
+})
+sc.add(CONFIG.rowH + 6)
+
+-- Advanced Hub Settings (Aimbot V2 style) -----------------------------
+sc.header("ADVANCED - VALUES", "adv-values")
+RT(sc, { id="adv-enabled", text="Enabled", default=false, onChange=function(v) if engine and engine.aim then engine.aim.set(v) end end })
+RT(sc, { id="adv-toggle", text="Toggle", default=true, onChange=function(v) if engine and engine.aim then engine.aim.Toggle=v end end })
+RD(sc, { id="adv-lockpart", label="Lock Part", options={{name="Head"},{name="HumanoidRootPart"},{name="Torso"},{name="Left Arm"},{name="Right Arm"}}, defaultName="Head", onChange=function(opt) if engine and engine.aim then engine.aim.LockPart=opt.name end; showToast("Lock: "..opt.name,"accent") end })
+do
+    local keyBtn = UI.button({ text="Set Hotkey: Q", size=UDim2.new(1,-10,0,CONFIG.rowH), position=UDim2.new(0,5,0,sc.rowY()), color=COLOR.panel, textSize=11, parent=sc.frame, onClick=function()
+        showToast("Press a key...","accent")
+        local conn; conn=UserInputService.InputBegan:Connect(function(inp,gpe)
+            if inp.UserInputType==Enum.UserInputType.Keyboard then
+                if engine and engine.aim then engine.aim.TriggerKey=tostring(inp.KeyCode):match("%.(.+)") end
+                keyBtn.Text="Hotkey: "..tostring(inp.KeyCode):match("%.(.+)")
+                conn:Disconnect()
+            end
+        end)
+    end})
+    sc.add(CONFIG.rowH+4)
+end
+RS(sc, { id="adv-sensitivity", text="Sensitivity", min=0, max=100, default=50, onChange=function(v) if engine and engine.aim then engine.aim.Sensitivity=v/100 end end })
+
+sc.header("CHECKS", "adv-checks")
+RT(sc, { id="adv-teamcheck", text="Team Check", default=false, onChange=function(v) if engine and engine.aim then engine.aim.TeamCheck=v end end })
+RT(sc, { id="adv-wallcheck", text="Wall Check", default=false, onChange=function(v) if engine and engine.aim then engine.aim.WallCheck=v end end })
+RT(sc, { id="adv-alivecheck", text="Alive Check", default=true, onChange=function(v) if engine and engine.aim then engine.aim.AliveCheck=v end end })
+
+sc.header("THIRD PERSON", "adv-tp")
+RT(sc, { id="adv-tp-enabled", text="Enable Third Person", default=false, onChange=function(v) if engine and engine.aim then engine.aim.ThirdPerson=v end end })
+RS(sc, { id="adv-tp-sens", text="TP Sensitivity", min=1, max=50, default=10, onChange=function(v) if engine and engine.aim then engine.aim.ThirdPersonSensitivity=v/10 end end })
+
+sc.header("FOV", "adv-fov")
+RT(sc, { id="adv-fov-enabled", text="FOV Enabled", default=false, onChange=function(v) if engine and engine.aim then engine.aim.FOVEnabled=v end end })
+RT(sc, { id="adv-fov-visible", text="FOV Visible", default=true, onChange=function(v) if engine and engine.aim then engine.aim.FOVVisible=v end end })
+RS(sc, { id="adv-fov-amount", text="FOV Amount", min=10, max=300, default=90, onChange=function(v) if engine and engine.aim then engine.aim.FOVAmount=v end end })
+RT(sc, { id="adv-fov-filled", text="FOV Filled", default=false, onChange=function(v) if engine and engine.aim then engine.aim.FOVFilled=v end end })
+RS(sc, { id="adv-fov-transp", text="Transparency", min=0, max=100, default=50, onChange=function(v) if engine and engine.aim then engine.aim.FOVTransparency=v/100 end end })
+RS(sc, { id="adv-fov-sides", text="Sides", min=3, max=60, default=12, onChange=function(v) if engine and engine.aim then engine.aim.FOVSides=v end end })
+RS(sc, { id="adv-fov-thick", text="Thickness", min=1, max=50, default=2, onChange=function(v) if engine and engine.aim then engine.aim.FOVThickness=v end end })
+do
+    local cols={{name="White",c=Color3.fromRGB(255,255,255)},{name="Red",c=Color3.fromRGB(255,60,60)},{name="Blue",c=Color3.fromRGB(80,120,255)},{name="Green",c=Color3.fromRGB(80,255,120)}}
+    UI.label({ text="FOV Color", size=UDim2.new(0,100,0,20), position=UDim2.new(0,10,0,sc.rowY()), x=Enum.TextXAlignment.Left, color=COLOR.textDim, textSize=11, parent=sc.frame })
+    sc.add(20)
+    local ry=sc.rowY()
+    for i,e in ipairs(cols) do
+        UI.pill({ text=e.name, size=UDim2.new(0,68,0,CONFIG.rowH), position=UDim2.new(0,6+(i-1)*74,0,ry), parent=sc.frame, color=e.c, textColor=Color3.fromRGB(10,10,14), textSize=10, onClick=function() if engine and engine.aim then engine.aim.FOVColor=e.c end; showToast("FOV Color: "..e.name,"accent") end })
+    end
+    sc.add(CONFIG.rowH+6)
+end
+UI.pill({ text="Reset Advanced", size=UDim2.new(0,120,0,CONFIG.rowH), position=UDim2.new(0,6,0,sc.rowY()), parent=sc.frame, colorRole="warn", onClick=function() showToast("Advanced reset","textDim") end })
+sc.add(CONFIG.rowH+6)
+
+-- record the settings page content bottom for finalize
+HUB.contentBottom[HUB.pages.settings] = sc.pos()
+print("[BASE] part8 ok")
+-- =====================================================================
+-- PART 12. BOOT -- extras tabs, console, keybinds, finalize, aliases
+-- =====================================================================
+-- Extras sub-tabs + terminal (builders live in PART 7)
+buildExtrasTabs()
+buildTerminal(HUB.views.console)
+
+-- Console log area
+do
+    local log = Instance.new("ScrollingFrame")
+    log.Name = "ConsoleLog"
+    log.Size = UDim2.new(1, -14, 1, -14)
+    log.Position = UDim2.new(0, 7, 0, 7)
+    log.BackgroundColor3 = COLOR.bg
+    log.BorderSizePixel = 0
+    log.CanvasSize = UDim2.new(0, 0, 0, 1)
+    log.ScrollBarThickness = 5
+    log.Parent = HUB.views.console
+    HUB.rows.consoleLog = log
+
+    local entries = 0
+    HUB.log = function(text, tone)
+        local color = COLOR.textDim
+        if tone == "on" then color = COLOR.on
+        elseif tone == "warn" then color = COLOR.warn
+        elseif tone == "accent" then color = COLOR.accent end
+        entries = entries + 1
+        UI.label({
+            name = "LogEntry", text = text, size = UDim2.new(1, -10, 0, 16),
+            position = UDim2.new(0, 5, 0, (entries - 1) * 17),
+            x = Enum.TextXAlignment.Left, color = color, textSize = 10, parent = log,
+        })
+        log.CanvasSize = UDim2.new(0, 0, 0, entries * 17)
+        if log.CanvasPosition and log.CanvasSize.Y.Offset > 200 then
+            log.CanvasPosition = Vector2.new(0, log.CanvasSize.Y.Offset)
+        end
+    end
+    HUB.log("BASE v1 loaded", "on")
+    HUB.log("type in the bar to run commands, \\ chains them", "textDim")
+end
+
+-- Size every page/view canvas to its content and record content bottoms
+-- (needed by section finalize + collapse shifting). Scrolls stay live:
+-- collapse/expand re-runs refreshCanvas from the section system.
+for _, page in pairs(HUB.pages) do
+    if page then HUB.refreshCanvas(page) end
+end
+for _, v in pairs(HUB.views) do
+    if v then HUB.refreshCanvas(v) end
+end
+
+-- RED 101: snapshot every section ONCE from the final un-shifted layout
+HUB.finalizeCollapsibles = function()
+    for _, e in ipairs(HUB.sectionHeaders) do
+        if e.finalize then e.finalize() end
+    end
+end
+HUB.finalizeCollapsibles()
+
+-- Keybinds ---------------------------------------------------------------
+do
+    UserInputService.InputBegan:Connect(function(input, gpe)
+        if gpe or input.UserInputType ~= Enum.UserInputType.Keyboard then return end
+        if input.KeyCode == Enum.KeyCode.Semicolon then
+            HUB.frame.Visible = not HUB.frame.Visible
+        elseif input.KeyCode == Enum.KeyCode.RightControl then
+            addcmd("fly")
+        elseif input.KeyCode == Enum.KeyCode.X then
+            addcmd("noclip")
+        elseif input.KeyCode == Enum.KeyCode.F then
+            addcmd("aim")
+        end
+    end)
+    UserInputService.InputEnded:Connect(function(input, gpe)
+        if gpe or input.UserInputType ~= Enum.UserInputType.Keyboard then return end
+        if input.KeyCode == Enum.KeyCode.F then
+            addcmd("aim", "off")
+        end
+    end)
+end
+
+-- Initial look: apply the saved UI preset if one exists, else defaults
+do
+    local saved = HUB.PRESETS.imported[1]
+    if saved and saved.theme then
+        HUB.applyTheme(saved.theme)
+        if saved.font then HUB.applyFont(saved.font) end
+        if saved.size then HUB.applySize(saved.size) end
+        if saved.text then HUB.applyTextPreset(saved.text) end
+        if saved.border then HUB.applyBorderStyle(saved.border) end
+        if saved.filter then HUB.applyEdgingFilter(saved.filter) end
+    else
+        HUB.applyTheme(THEME_PRESETS[2])
+    end
+end
+
+-- Show the main page
+showPage("main")
+
+-- Client-side boot diagnostics: run once immediately and again ~0.7s in.
+local function diag()
+    local function absInfo(obj)
+        local p, s = obj.AbsolutePosition, obj.AbsoluteSize
+        return (p and ("%d,%d"):format(p.X, p.Y) or "nil"), (s and ("%d,%d"):format(s.X, s.Y) or "nil")
+    end
+    local ap, as = absInfo(HUB.frame)
+    print(("[DIAG] frame visible=%s abs=%s size=%s"):format(tostring(HUB.frame.Visible), ap, as))
+    for _, pid in ipairs({ "main", "chase", "settings", "extras" }) do
+        local page = HUB.pages[pid]
+        if page then
+            local n = 0
+            for _ in pairs(page:GetChildren()) do n = n + 1 end
+            local paps, pass = absInfo(page)
+            local extra = ""
+            if page:IsA("ScrollingFrame") then
+                local cv = page.CanvasSize
+                local cp = page.CanvasPosition
+                extra = (" canvasY=%s posY=%s"):format(cv and tostring(cv.Y.Offset) or "-", cp and tostring(cp.Y) or "-")
+            end
+            print(("[DIAG] page %s visible=%s children=%d abs=%s size=%s%s"):format(
+                pid, tostring(page.Visible), n, paps, pass, extra))
+        end
+    end
+end
+diag()
+
+-- Defensive re-assert shortly after load: force the window + current page
+-- visible and reset scroll. Re-prints diagnostics for comparison.
+task.delay(0.7, function()
+    if HUB.frame and not HUB.frame.Visible then HUB.frame.Visible = true end
+    if HUB.showPage then HUB.showPage(HUB.currentPage or "main") end
+    for _, page in pairs(HUB.pages) do
+        if page and page:IsA("ScrollingFrame") and page.CanvasPosition then
+            pcall(function() page.CanvasPosition = Vector2.new(0, 0) end)
+        end
+        if HUB.refreshCanvas then pcall(HUB.refreshCanvas, page) end
+    end
+    diag()
+end)
+
+-- Visibility confirmation: tells the user whether the hub rendered
+task.delay(1.0, function()
+    if HUB.frame and HUB.frame.Visible then
+        showToast("Hub active — press ; to toggle", "on")
+    else
+        showToast("Hub hidden — press ; to show", "warn")
+    end
+end)
+
+-- Harness / legacy contract
+_G.schizhubV6 = HUB
+_G.schizhubV4 = HUB
+
+-- Boot toast
+task.delay(0.4, function()
+    showToast("BASE loaded — " .. CONFIG.companion .. " is watching", "on")
+end)
+print("[BASE] part9 ok")

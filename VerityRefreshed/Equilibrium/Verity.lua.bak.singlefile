@@ -1,0 +1,778 @@
+-- VERITY — UNIFIED SINGLE-SCRIPT 2D CHARACTER (Equilibrium Hub companion)
+-- Sections: CONFIG | WARDROBE DATA | EXPRESSIONS | PROFILE | CHARACTER CREATION | LAYER RENDERING | ANIMATION TIMING | ANIMATION STATES | EFFECTS | RESPONSE/TEXT | WARDROBE UI | EVENTS | PERSISTENCE | INIT
+-- All Frame/UICorner/UIStroke procedural 72x96 → 168 orb, Slate 070707 / Gold border, one Heartbeat loop, layered priority, wardrobe global
+
+local VERITY_VERSION = "1.0"
+
+-- =========================================================================
+-- CONFIG
+-- =========================================================================
+local CONFIG = {
+    Size = Vector2.new(72,96),
+    Orb = 168,
+    Bg = Color3.fromHex("070707"),
+    Gold = Color3.fromRGB(201,168,106),
+    Slate = Color3.fromHex("141414"),
+    DEBUG = false,
+    ConversationActiveTimeout = 30, -- configurable seconds, wardrobe/system do not reset
+}
+
+-- =========================================================================
+-- WARDROBE DATA (SYSTEM ID → displayName/desc)  procedural Frames only
+-- =========================================================================
+local WARDROBE = {
+    Head = {
+        Head_01={name="Default", desc="Standard Verity head."},
+        Head_02={name="Soft", desc="Slightly rounder and friendlier."},
+        Head_03={name="Sharp", desc="Slightly more angular and serious."},
+    },
+    Hair = {
+        Hair_01={name="Default", desc="Medium styled hair with recognizable front strands."},
+        Hair_02={name="Neat", desc="Clean and controlled hairstyle."},
+        Hair_03={name="Messy", desc="Uneven hair with separated strands."},
+        Hair_04={name="Fluffy", desc="Fuller, rounded hairstyle."},
+        Hair_05={name="Side Sweep", desc="Hair swept toward one side."},
+        Hair_06={name="Long Fringe", desc="Long bangs partially covering the forehead."},
+        Hair_07={name="Short", desc="Simple short hairstyle."},
+        Hair_08={name="Bedhead", desc="Messy hair with random strands."},
+        Hair_09={name="Combed Back", desc="Hair pushed away from the face."},
+        Hair_10={name="Long", desc="Longer hair reaching toward the shoulders."},
+    },
+    Eyes = {
+        Eyes_01={name="Default", desc="Focused direct gaze."},
+        Eyes_02={name="Relaxed", desc="Half-lidded calm eyes."},
+        Eyes_03={name="Wide", desc="Alert and surprised."},
+        Eyes_04={name="Narrow", desc="Confident or suspicious."},
+        Eyes_05={name="Curious", desc="Slightly widened and attentive."},
+        Eyes_06={name="Tired", desc="Heavy eyelids."},
+        Eyes_07={name="Happy", desc="Soft cheerful eyes."},
+        Eyes_08={name="Glitched", desc="Subtle digital distortion."},
+    },
+    Brows = {
+        Brows_01={name="Neutral"}, Brows_02={name="Raised"}, Brows_03={name="Focused"},
+        Brows_04={name="Worried"}, Brows_05={name="Confused"}, Brows_06={name="Annoyed"},
+    },
+    Mouth = {
+        Mouth_01={name="Neutral", desc="Small straight mouth."},
+        Mouth_02={name="Soft Smile"}, Mouth_03={name="Smile"}, Mouth_04={name="Smirk"},
+        Mouth_05={name="Talking"}, Mouth_06={name="Laughing"}, Mouth_07={name="Surprised"},
+        Mouth_08={name="Concerned"}, Mouth_09={name="Pout"},
+        Talk_01={name="Closed"}, Talk_02={name="Small Open"}, Talk_03={name="Wide Open"},
+    },
+    Body = {
+        Body_01={name="Default", desc="Slim standard Verity body."},
+        Body_02={name="Relaxed"}, Body_03={name="Formal"},
+    },
+    Tops = {
+        Top_01={name="Default Jacket"}, Top_02={name="Hoodie"}, Top_03={name="Tech Jacket"}, Top_04={name="Sweater"},
+        Top_05={name="Turtleneck"}, Top_06={name="Long Coat"}, Top_07={name="Casual Shirt"}, Top_08={name="Zip Jacket"},
+    },
+    Bottoms = {
+        Bottom_01={name="Dark Pants"}, Bottom_02={name="Jeans"}, Bottom_03={name="Cargo Pants"}, Bottom_04={name="Joggers"}, Bottom_05={name="Shorts"},
+    },
+    Shoes = { Shoes_01={name="Sneakers"}, Shoes_02={name="High Tops"}, Shoes_03={name="Boots"}, Shoes_04={name="Casual Shoes"}, },
+    HeadAcc = {
+        HeadAccessory_01={name="None"}, HeadAccessory_02={name="Beanie"}, HeadAccessory_03={name="Cap"}, HeadAccessory_04={name="Headphones"},
+        HeadAccessory_05={name="Cat Ears"}, HeadAccessory_06={name="Bunny Ears"}, HeadAccessory_07={name="Party Hat"}, HeadAccessory_08={name="Balloon Hat"},
+        HeadAccessory_09={name="Wizard Hat"}, HeadAccessory_10={name="Tiny Crown"}, HeadAccessory_11={name="Halo"}, HeadAccessory_12={name="Propeller Hat"},
+    },
+    FaceAcc = {
+        FaceAccessory_01={name="None"}, FaceAccessory_02={name="Glasses"}, FaceAccessory_03={name="Round Glasses"}, FaceAccessory_04={name="Sunglasses"},
+        FaceAccessory_05={name="Pixel Glasses"}, FaceAccessory_06={name="Monocle"}, FaceAccessory_07={name="Cheek Sticker"}, FaceAccessory_08={name="Blush"}, FaceAccessory_09={name="Digital Lens"},
+    },
+    NeckAcc = { NeckAccessory_01={name="None"}, NeckAccessory_02={name="Scarf"}, NeckAccessory_03={name="Necklace"}, NeckAccessory_04={name="Pendant"}, NeckAccessory_05={name="Bow Tie"}, },
+    BodyAcc = { BodyAccessory_01={name="None"}, BodyAccessory_02={name="Backpack"}, BodyAccessory_03={name="Crossbody Bag"}, BodyAccessory_04={name="Utility Belt"}, BodyAccessory_05={name="Cape"}, BodyAccessory_06={name="Blanket"}, },
+    Held = {
+        Held_01={name="None"}, Held_02={name="Lollipop"}, Held_03={name="Coffee"}, Held_04={name="Phone"}, Held_05={name="Notebook"},
+        Held_06={name="Game Controller"}, Held_07={name="Balloon"}, Held_08={name="Plushie"}, Held_09={name="Rubber Duck"}, Held_10={name="Microphone"},
+    },
+    Effects = {
+        Effect_01={name="None"}, Effect_02={name="Soft Glow"}, Effect_03={name="Digital Particles"}, Effect_04={name="Scanlines"},
+        Effect_05={name="Pixel Flicker"}, Effect_06={name="Hologram"}, Effect_07={name="Glitch"}, Effect_08={name="Eye Glow"},
+        Effect_09={name="Sparkles"}, Effect_10={name="Hearts"},
+    },
+}
+
+-- =========================================================================
+-- EXPRESSIONS (presets Eyes+Brows+Mouth)  Advanced can override one layer
+-- =========================================================================
+local EXPRESSIONS = {
+    Expression_01={name="Neutral",   eyes="Eyes_01", brows="Brows_01", mouth="Mouth_01"},
+    Expression_02={name="Happy",     eyes="Eyes_07", brows="Brows_01", mouth="Mouth_03"},
+    Expression_03={name="Curious",   eyes="Eyes_05", brows="Brows_02", mouth="Mouth_02"},
+    Expression_04={name="Surprised", eyes="Eyes_03", brows="Brows_02", mouth="Mouth_07"},
+    Expression_05={name="Tired",     eyes="Eyes_06", brows="Brows_01", mouth="Mouth_01"},
+    Expression_06={name="Amused",    eyes="Eyes_02", brows="Brows_02", mouth="Mouth_04"},
+    Expression_07={name="Annoyed",   eyes="Eyes_04", brows="Brows_06", mouth="Mouth_01"},
+    Expression_08={name="Concerned", eyes="Eyes_01", brows="Brows_04", mouth="Mouth_08"},
+    Expression_09={name="Confused",  eyes="Eyes_05", brows="Brows_05", mouth="Mouth_08"},
+    Expression_10={name="Glitched",  eyes="Eyes_08", brows="Brows_03", mouth="Mouth_05"},
+}
+
+-- =========================================================================
+-- PROFILE (global, survives PlaceId)
+-- =========================================================================
+local PROFILE = {
+    Head="Head_01", Hair="Hair_03", Eyes="Eyes_01", Brows="Brows_01", Mouth="Mouth_02", Body="Body_01",
+    Top="Top_02", Bottom="Bottom_01", Shoes="Shoes_01",
+    HeadAccessory="HeadAccessory_08", FaceAccessory="FaceAccessory_02", NeckAccessory="NeckAccessory_01", BodyAccessory="BodyAccessory_01",
+    Held="Held_02", Expression="Expression_02", Effect="Effect_01",
+}
+
+-- =========================================================================
+-- SERVICES / STATE
+-- =========================================================================
+local Players = game:GetService("Players")
+local TweenService = game:GetService("TweenService")
+local RunService = game:GetService("RunService")
+local LP = Players.LocalPlayer
+
+local Verity = {}
+local Gui, VerityCanvas, OrbsFrame
+local Anchors = {} -- BodyAnchor, HeadAnchor, HairAnchor, EyeAnchor, BrowAnchor, MouthAnchor, ClothingAnchor, HeldItemAnchor, EffectAnchor
+local Layers = {} -- cached Frames: body, head, hair, eyes, brows, mouth, clothing, held, effect
+local DEBUG_LABEL
+
+-- =========================================================================
+-- ANIMATION TIMING — single central clock
+-- =========================================================================
+local ANIMATION_TIMING = {
+    GlobalSpeed = 1.0,
+    Idle = { Speed=1.0, MovementAmount=1, Cycle=3.5 },
+    Blink = { MinimumDelay=2.5, MaximumDelay=6.0, ClosedTime=0.10, DoubleBlinkChance=0.08 },
+    Talking = { MouthInterval=0.10, RandomVariation=0.04 },
+    Thinking = { Cycle=2.5 },
+    Reaction = { DefaultDuration=0.75, Happy=0.75, Surprised=0.65 },
+    Transition = { DefaultDuration=0.15 },
+    Effects = { GlowSpeed=1.5, FlickerSpeed=0.12, GlitchInterval=2.5 },
+}
+
+local animationState = {
+    Current="Idle", Previous="Idle", Time=0, StateTime=0, Speed=1,
+    Talking=false, Blinking=false, Reaction=nil, ReactionTime=0, Expression="Expression_01", Paused=false,
+}
+
+local animationTimers = { Blink=0, BlinkNext=4, Talk=0, Idle=0, Expression=0, Effect=0, Glitch=0 }
+
+local function RandomRange(a,b) return a + math.random()*(b-a) end
+local heartbeatConn
+
+-- idle variation pool 60/15/10/5/5/5
+local IDLE_POOL = {
+    {id="Idle_01", name="Normal", w=60, fn=function(t) return math.sin(t*1.8)*1.0, math.sin(t*1.8)*0.5 end},
+    {id="Idle_02", name="Slight Lean", w=15, fn=function(t) return math.sin(t*1.4)*1.2 + 0.6, math.sin(t*1.4)*0.3 end},
+    {id="Idle_03", name="Head Tilt", w=10, fn=function(t) return math.sin(t*1.6)*0.6, math.cos(t*1.6)*0.4 end},
+    {id="Idle_04", name="Look Around", w=5, fn=function(t) return math.sin(t*2.8)*0.3, math.sin(t*3.2)*0.2 end},
+    {id="Idle_05", name="Small Bounce", w=5, fn=function(t) return math.abs(math.sin(t*3.0))*1.4, 0 end},
+    {id="Idle_06", name="Still", w=5, fn=function() return 0,0 end},
+}
+local currentIdle = IDLE_POOL[1]
+local idleCycleStart = 0
+local function pickIdle()
+    local roll=math.random()*100 local acc=0
+    for _,e in ipairs(IDLE_POOL) do acc+=e.w if roll<=acc then currentIdle=e break end end
+    idleCycleStart=animationState.Time
+end
+
+-- helpers
+local function tween(obj, props, dur) return TweenService:Create(obj, TweenInfo.new(dur or ANIMATION_TIMING.Transition.DefaultDuration, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), props) end
+
+-- idle
+local function UpdateIdle(dt)
+    local t=animationState.Time*ANIMATION_TIMING.Idle.Speed*animationState.Speed
+    -- cycle reset
+    if t - idleCycleStart >= ANIMATION_TIMING.Idle.Cycle then pickIdle() end
+    local by,bx = currentIdle.fn(t)
+    by*= ANIMATION_TIMING.Idle.MovementAmount; bx*= ANIMATION_TIMING.Idle.MovementAmount
+    -- Body tiny Y, Head slight, Hair follows Head +0.1
+    if Layers.body and Anchors.BodyAnchor then
+        Anchors.BodyAnchor.Position = UDim2.new(0.5,0,0.5, by*0.6)
+    end
+    if Anchors.HeadAnchor then
+        Anchors.HeadAnchor.Position = UDim2.new(0.5, bx*0.5, 0.35, by*0.4)
+    end
+    if Anchors.HairAnchor and Anchors.HeadAnchor then
+        -- secondary offset
+        Anchors.HairAnchor.Position = UDim2.new(0, bx*0.6, 0, by*0.5 -2)
+    end
+    if CONFIG.DEBUG and DEBUG_LABEL then DEBUG_LABEL.Text = ("Idle:%s T=%.1f"):format(currentIdle.id, t) end
+end
+
+-- blink
+local blinkPhase="open" -- open->closing->closed->opening
+local blinkT=0
+local function doBlink()
+    animationState.Blinking=true; blinkPhase="closing"; blinkT=0
+end
+local function UpdateBlink(dt)
+    animationTimers.Blink += dt * animationState.Speed
+    if not animationState.Blinking and animationTimers.Blink >= animationTimers.BlinkNext then
+        doBlink(); animationTimers.Blink=0
+        animationTimers.BlinkNext = RandomRange(ANIMATION_TIMING.Blink.MinimumDelay, ANIMATION_TIMING.Blink.MaximumDelay)
+    end
+    if not animationState.Blinking then return end
+    blinkT+= dt*animationState.Speed
+    local closing=0.05; local closed=ANIMATION_TIMING.Blink.ClosedTime; local opening=0.05
+    if blinkPhase=="closing" then
+        local p=math.clamp(blinkT/closing,0,1)
+        if Layers.eyes then for _,e in ipairs(Layers.eyes) do e.Size = UDim2.new(0,6,0, math.clamp(8*(1-p)+1*p,1,8)) end end
+        if blinkT>=closing then blinkPhase="closed"; blinkT=0 end
+    elseif blinkPhase=="closed" then
+        if blinkT>=closed then blinkPhase="opening"; blinkT=0 end
+    elseif blinkPhase=="opening" then
+        local p=math.clamp(blinkT/opening,0,1)
+        if Layers.eyes then for _,e in ipairs(Layers.eyes) do e.Size = UDim2.new(0,6,0, math.clamp(1*(1-p)+8*p,1,8)) end end
+        if blinkT>=opening then
+            animationState.Blinking=false; blinkPhase="open"; blinkT=0
+            if math.random() < ANIMATION_TIMING.Blink.DoubleBlinkChance then
+                animationTimers.Blink = animationTimers.BlinkNext - RandomRange(0.12,0.22)
+            end
+        end
+    end
+end
+
+-- talking — mouth only, 0.10 ±0.04 random, Talk_01→02→03
+local talkFrames={"Mouth_Talk_01","Mouth_Talk_02","Mouth_Talk_03"}
+local talkIdx=1; local talkDur=ANIMATION_TIMING.Talking.MouthInterval
+local function UpdateTalking(dt)
+    if not animationState.Talking then return end
+    animationTimers.Talk += dt*animationState.Speed
+    if animationTimers.Talk >= talkDur then
+        animationTimers.Talk=0
+        talkIdx = (talkIdx % #talkFrames)+1
+        talkDur = ANIMATION_TIMING.Talking.MouthInterval + RandomRange(-ANIMATION_TIMING.Talking.RandomVariation, ANIMATION_TIMING.Talking.RandomVariation)
+        local id=talkFrames[talkIdx]
+        -- map to mouth size
+        if Layers.mouth then
+            if id=="Mouth_Talk_01" then Layers.mouth.Size=UDim2.new(0,14,0,4)
+            elseif id=="Mouth_Talk_02" then Layers.mouth.Size=UDim2.new(0,16,0,6)
+            else Layers.mouth.Size=UDim2.new(0,18,0,8) end
+        end
+    end
+end
+
+-- reaction — priority 3, restores Previous expression after duration
+local function PlayReaction(name)
+    local dur = ANIMATION_TIMING.Reaction[name] or ANIMATION_TIMING.Reaction.DefaultDuration
+    animationState.Previous = animationState.Current
+    animationState.Current = "Reaction"
+    animationState.Reaction = name
+    animationState.ReactionTime = 0
+    -- apply reaction expression
+    local map={Happy="Expression_02", Surprised="Expression_04", Confused="Expression_09", Annoyed="Expression_07", Concerned="Expression_08"}
+    local expr = map[name] or "Expression_01"
+    Verity.SetExpression(expr, true) -- instant per reaction
+    -- body/head kick
+    if Anchors.BodyAnchor then tween(Anchors.BodyAnchor,{Position=UDim2.new(0.5,0,0.5,-4)},0.08):Play() end
+end
+
+local function UpdateReaction(dt)
+    if animationState.Current~="Reaction" then return end
+    animationState.ReactionTime+= dt*animationState.Speed
+    local need = ANIMATION_TIMING.Reaction[animationState.Reaction] or ANIMATION_TIMING.Reaction.DefaultDuration
+    if animationState.ReactionTime >= need then
+        -- restore
+        Verity.SetExpression(PROFILE.Expression, true)
+        if Anchors.BodyAnchor then tween(Anchors.BodyAnchor,{Position=UDim2.new(0.5,0,0.5,0)},0.10):Play() end
+        animationState.Current = animationState.Previous or "Idle"
+        animationState.Reaction=nil; animationState.ReactionTime=0
+    end
+end
+
+-- effects — glow 1.5s cycle, flicker 0.12, glitch 2.5 interval random 2-5
+local effectPhase=0; local glitchT=0; local glitchNext=RandomRange(2,5)
+local function UpdateEffects(dt)
+    animationTimers.Effect+= dt*animationState.Speed
+    effectPhase+= dt*ANIMATION_TIMING.Effects.GlowSpeed
+    if Layers.effectGlow then
+        local a = 0.5 + math.sin(effectPhase)*0.25
+        Layers.effectGlow.BackgroundTransparency = a
+    end
+    -- scanlines slow 1-2px every few frames (static mostly)
+    -- flicker occasional
+    if animationTimers.Effect >= ANIMATION_TIMING.Effects.FlickerSpeed then
+        if PROFILE.Effect=="Effect_05" and math.random()<0.08 then
+            if Layers.effectFlicker then Layers.effectFlicker.BackgroundTransparency = math.random()<0.5 and 0.3 or 0.7 end
+        end
+        animationTimers.Effect=0
+    end
+    glitchT+= dt*animationState.Speed
+    if glitchT >= glitchNext then
+        if PROFILE.Effect=="Effect_07" or Verity.state=="Glitched" or math.random()<0.04 then
+            local dx=math.random(-2,2); local dy=math.random(-1,1)
+            if VerityCanvas then VerityCanvas.Position = UDim2.new(0.5, dx, 0.5, dy) end
+            task.delay(RandomRange(0.05,0.15), function() if VerityCanvas then VerityCanvas.Position=UDim2.new(0.5,0,0.5,0) end end)
+        end
+        glitchT=0; glitchNext=RandomRange(2,5)
+    end
+end
+
+-- main single loop
+local function UpdateAnimations(dt)
+    if animationState.Paused then return end
+    dt *= ANIMATION_TIMING.GlobalSpeed * animationState.Speed
+    animationState.Time+= dt; animationState.StateTime+= dt
+    UpdateIdle(dt); UpdateBlink(dt); UpdateTalking(dt); UpdateReaction(dt); UpdateEffects(dt)
+end
+
+-- public animation API — inside same script
+function Verity.SetAnimation(name) animationState.Previous=animationState.Current; animationState.Current=name; animationState.StateTime=0 end
+function Verity.StartTalking() animationState.Talking=true; animationTimers.Talk=0; talkIdx=1 end
+function Verity.StopTalking() animationState.Talking=false; -- restore mouth to expression
+    local e=EXPRESSIONS[PROFILE.Expression] or EXPRESSIONS.Expression_01
+    if Layers.mouth then Layers.mouth.Size = UDim2.new(0, (e and 14 or 14),0,4) end
+end
+function Verity.Blink() doBlink() end
+function Verity.PlayReaction(name) PlayReaction(name) end
+function Verity.SetAnimationSpeed(s) animationState.Speed=s end
+function Verity.PauseAnimations() animationState.Paused=true end
+function Verity.ResumeAnimations() animationState.Paused=false end
+function Verity.SetExpression(id, instant)
+    local e=EXPRESSIONS[id] if not e then return end
+    PROFILE.Expression=id
+    local dur = instant and 0 or ANIMATION_TIMING.Transition.DefaultDuration
+    -- stagger 0.05 eyes, 0.10 brows, 0.15 mouth if animated
+    if Layers.eyes then
+        for _,eye in ipairs(Layers.eyes) do
+            -- map eyes id to size
+            local map={Eyes_01=8, Eyes_02=5, Eyes_03=10, Eyes_04=5, Eyes_05=9, Eyes_06=4, Eyes_07=7, Eyes_08=8}
+            local h=map[e.eyes] or 8; tween(eye,{Size=UDim2.new(0,6,0,h)}, dur+0.05):Play()
+        end
+    end
+    if Layers.brows then tween(Layers.brows[1],{Position=UDim2.new(0,0,0, ({Brows_02= -4, Brows_04=2})[e.brows] or 0)}, dur+0.08):Play() end
+    if Layers.mouth and not animationState.Talking then tween(Layers.mouth,{Size=UDim2.new(0,14,0, ({Mouth_03=6, Mouth_07=8})[e.mouth] or 4)}, dur+0.12):Play() end
+end
+
+-- =========================================================================
+-- CHARACTER CREATION — procedural Frames 72x96 → 168 orb
+-- =========================================================================
+local function corner(o,r) local c=Instance.new("UICorner") c.CornerRadius=UDim.new(0,r) c.Parent=o return c end
+local function stroke(o,c,t) local s=Instance.new("UIStroke") s.Color=c s.Thickness=t s.ApplyStrokeMode=Enum.ApplyStrokeMode.Border s.Parent=o return s end
+
+function Verity.CreateCharacter(parent)
+    -- canvas
+    VerityCanvas = Instance.new("Frame")
+    VerityCanvas.Name="VerityCanvas"; VerityCanvas.Size=UDim2.fromOffset(CONFIG.Size.X, CONFIG.Size.Y)
+    VerityCanvas.Position=UDim2.new(0.5,0,0.5,0); VerityCanvas.AnchorPoint=Vector2.new(0.5,0.5)
+    VerityCanvas.BackgroundTransparency=1; VerityCanvas.Parent=parent
+
+    -- anchors
+    for _,n in ipairs({"BodyAnchor","HeadAnchor","HairAnchor","EyeAnchor","BrowAnchor","MouthAnchor","ClothingAnchor","HeldItemAnchor","EffectAnchor"}) do
+        local a=Instance.new("Frame") a.Name=n; a.Size=UDim2.fromOffset(1,1); a.BackgroundTransparency=1; a.Position=UDim2.new(0.5,0,0.5,0); a.AnchorPoint=Vector2.new(0.5,0.5); a.Parent=VerityCanvas; Anchors[n]=a
+    end
+    Anchors.BodyAnchor.Size=UDim2.fromOffset(40,48); Anchors.BodyAnchor.Position=UDim2.new(0.5,0,0.62,0)
+    Anchors.HeadAnchor.Size=UDim2.fromOffset(34,36); Anchors.HeadAnchor.Position=UDim2.new(0.5,0,0.32,0)
+    Anchors.HairAnchor.Parent=Anchors.HeadAnchor; Anchors.HairAnchor.Size=UDim2.fromOffset(36,14); Anchors.HairAnchor.Position=UDim2.new(0.5,0,0, -10)
+    Anchors.EyeAnchor.Parent=Anchors.HeadAnchor
+    Anchors.ClothingAnchor.Parent=Anchors.BodyAnchor
+    Anchors.HeldItemAnchor.Parent=Anchors.BodyAnchor; Anchors.HeldItemAnchor.Position=UDim2.new(1, -6, 0.5, 8)
+    Anchors.EffectAnchor.Parent=VerityCanvas
+
+    -- Body
+    local body=Instance.new("Frame") body.Name="Body"; body.Size=UDim2.fromOffset(28,36); body.Position=UDim2.new(0.5,0,0.5,0); body.AnchorPoint=Vector2.new(0.5,0.5); body.BackgroundColor3=Color3.fromHex("1e1e24"); body.Parent=Anchors.BodyAnchor corner(body,10) Layers.body=body
+    -- Clothing (top)
+    local top=Instance.new("Frame") top.Name="Top"; top.Size=UDim2.fromOffset(30,28); top.Position=UDim2.new(0.5,0,0, -2); top.AnchorPoint=Vector2.new(0.5,0); top.BackgroundColor3=Color3.fromHex("2a2a3a"); top.Parent=Anchors.ClothingAnchor corner(top,6) Layers.clothing=top
+    -- Head
+    local head=Instance.new("Frame") head.Name="Head"; head.Size=UDim2.fromOffset(34,30); head.Position=UDim2.new(0.5,0,0.5,0); head.AnchorPoint=Vector2.new(0.5,0.5); head.BackgroundColor3=Color3.fromRGB(255,220,55); head.Parent=Anchors.HeadAnchor corner(head,8) stroke(head, Color3.fromRGB(16,16,16),1) Layers.head=head
+    -- Hair
+    local hair=Instance.new("Frame") hair.Name="Hair"; hair.Size=UDim2.fromOffset(36,12); hair.Position=UDim2.new(0.5,0,0,0); hair.AnchorPoint=Vector2.new(0.5,0.5); hair.BackgroundColor3=Color3.fromHex("3a2a1a"); hair.Parent=Anchors.HairAnchor corner(hair,6) Layers.hair=hair
+    -- Eyes (2)
+    local eyes={}
+    for i=1,2 do local e=Instance.new("Frame") e.Name="Eye"..i; e.Size=UDim2.fromOffset(6,8); e.Position= i==1 and UDim2.new(0,4,0.5,-2) or UDim2.new(1,-10,0.5,-2); e.BackgroundColor3=Color3.fromRGB(16,16,16); e.Parent=Anchors.HeadAnchor corner(e,3) table.insert(eyes,e)
+        local pupil=Instance.new("Frame") pupil.Name="Pupil"; pupil.Size=UDim2.fromOffset(3,3); pupil.Position=UDim2.new(0.5,0,0.5,0); pupil.AnchorPoint=Vector2.new(0.5,0.5); pupil.BackgroundColor3=Color3.new(1,1,1); pupil.Parent=e corner(pupil,2)
+    end
+    Layers.eyes=eyes
+    -- Brows (2 small bars)
+    local brows={}
+    for i=1,2 do local b=Instance.new("Frame") b.Name="Brow"..i; b.Size=UDim2.fromOffset(10,2); b.Position= i==1 and UDim2.new(0,2,0,4) or UDim2.new(1,-12,0,4); b.BackgroundColor3=Color3.fromRGB(16,16,16); b.Parent=Anchors.HeadAnchor corner(b,1) table.insert(brows,b) end
+    Layers.brows=brows
+    -- Mouth (CanvasGroup arch)
+    local mouthCg=Instance.new("CanvasGroup") mouthCg.Name="Mouth"; mouthCg.Size=UDim2.fromOffset(18,8); mouthCg.Position=UDim2.new(0.5,0,1,-10); mouthCg.AnchorPoint=Vector2.new(0.5,0.5); mouthCg.BackgroundTransparency=1; mouthCg.Parent=Anchors.HeadAnchor
+    local mouthFrame=Instance.new("Frame") mouthFrame.Name="MouthFrame"; mouthFrame.Size=UDim2.fromOffset(14,4); mouthFrame.Position=UDim2.new(0.5,0,0.5,0); mouthFrame.AnchorPoint=Vector2.new(0.5,0.5); mouthFrame.BackgroundColor3=Color3.fromRGB(16,16,16); mouthFrame.Parent=mouthCg corner(mouthFrame,2)
+    Layers.mouth=mouthFrame; Layers.mouthCg=mouthCg
+    -- Held item anchor visual
+    local heldVis=Instance.new("Frame") heldVis.Name="HeldVis"; heldVis.Size=UDim2.fromOffset(12,12); heldVis.Position=UDim2.new(0.5,0,0.5,0); heldVis.AnchorPoint=Vector2.new(0.5,0.5); heldVis.BackgroundColor3=Color3.fromHex("ffb86a"); heldVis.Visible=false; heldVis.Parent=Anchors.HeldItemAnchor corner(heldVis,3) Layers.held=heldVis
+    -- Effect glow overlay
+    local glow=Instance.new("Frame") glow.Name="Glow"; glow.Size=UDim2.fromOffset(80,104); glow.Position=UDim2.new(0.5,0,0.5,0); glow.AnchorPoint=Vector2.new(0.5,0.5); glow.BackgroundColor3=Color3.fromHex("ffd23a"); glow.BackgroundTransparency=1; glow.Parent=Anchors.EffectAnchor corner(glow,16)
+    Layers.effectGlow=glow
+    local flicker=Instance.new("Frame") flicker.Name="Flicker"; flicker.Size=UDim2.fromOffset(80,104); flicker.Position=UDim2.new(0.5,0,0.5,0); flicker.AnchorPoint=Vector2.new(0.5,0.5); flicker.BackgroundTransparency=1; flicker.Parent=Anchors.EffectAnchor; Layers.effectFlicker=flicker
+
+    if CONFIG.DEBUG then
+        DEBUG_LABEL=Instance.new("TextLabel") DEBUG_LABEL.Name="Debug"; DEBUG_LABEL.Size=UDim2.new(1,0,0,14); DEBUG_LABEL.Position=UDim2.new(0,0,1,2); DEBUG_LABEL.BackgroundTransparency=1; DEBUG_LABEL.Text="DEBUG"; DEBUG_LABEL.TextSize=9; DEBUG_LABEL.TextColor3=Color3.fromHex("a0a0a8"); DEBUG_LABEL.Font=Enum.Font.Code; DEBUG_LABEL.Parent=VerityCanvas
+    end
+    return VerityCanvas
+end
+
+-- =========================================================================
+-- WARDROBE APPLY — targeted refresh only affected layer(s)
+-- =========================================================================
+function Verity.ApplyProfile()
+    -- head shape
+    if Layers.head then
+        local map={Head_01=8, Head_02=12, Head_03=2} local r=map[PROFILE.Head] or 8; local c=Layers.head:FindFirstChildOfClass("UICorner") if c then c.CornerRadius=UDim.new(0,r) end
+    end
+    -- hair
+    if Layers.hair then local t={Hair_01="#3a2a1a",Hair_03="#4a3320",Hair_08="#3d2b1a"} local c=t[PROFILE.Hair] or "#3a2a1a" Layers.hair.BackgroundColor3=Color3.fromHex(c:gsub("#","")) end
+    -- eyes/brows/mouth via expression
+    Verity.SetExpression(PROFILE.Expression, true)
+    -- clothing
+    if Layers.clothing then local t={Top_01="#1a1a1e",Top_02="#2a2a3a",Top_03="#24303a"} local col=t[PROFILE.Top] or "#2a2a3a" Layers.clothing.BackgroundColor3=Color3.fromHex(col:gsub("#","")) end
+    -- held
+    if Layers.held then Layers.held.Visible = PROFILE.Held ~= "Held_01" and Anchors.BodyAnchor.Visible~=false end
+    -- effect
+    if Layers.effectGlow then Layers.effectGlow.Visible = PROFILE.Effect ~= "Effect_01" end
+end
+
+function Verity.Equip(category, id)
+    if not WARDROBE[category] or not WARDROBE[category][id] then warn("[Verity] invalid equip",category,id) return false end
+    -- map category to profile key
+    local keyMap={Head="Head", Hair="Hair", Eyes="Eyes", Brows="Brows", Mouth="Mouth", Body="Body", Tops="Top", Bottoms="Bottom", Shoes="Shoes", HeadAcc="HeadAccessory", FaceAcc="FaceAccessory", NeckAcc="NeckAccessory", BodyAcc="BodyAccessory", Held="Held", Effects="Effect"}
+    local pkey=keyMap[category] or category
+    PROFILE[pkey]=id
+    -- targeted refresh
+    if category=="Hair" then
+        if Layers.hair then local t={Hair_01="#3a2a1a",Hair_03="#4a3320"} local col=t[id] or "#3a2a1a" Layers.hair.BackgroundColor3=Color3.fromHex(col:gsub("#","")) end
+    elseif category=="Eyes" or category=="Brows" or category=="Mouth" then
+        -- single layer override, do not reset timers
+        if category=="Eyes" then PROFILE.Eyes=id elseif category=="Brows" then PROFILE.Brows=id elseif category=="Mouth" then PROFILE.Mouth=id end
+        -- immediate visual without resetting Idle/Blink/Talk timers
+        Verity.SetExpression(PROFILE.Expression, true)
+    elseif category=="Tops" then
+        if Layers.clothing then Layers.clothing.BackgroundColor3=Color3.fromHex("2a2a3a") end
+    end
+    -- persist only IDs
+    Verity.SaveProfile()
+    -- notify hub 2-way
+    if _G.Equilibrium and _G.Equilibrium.EVENTS then _G.Equilibrium.EVENTS.fire("wardrobe:equip", category, id) end
+    if _G.EquilibriumNotify then pcall(function() _G.EquilibriumNotify("Wardrobe updated: "..WARDROBE[category][id].name) end) end
+    return true
+end
+
+-- Expression apply helper (already defined as Verity.SetExpression)
+
+-- =========================================================================
+-- EFFECTS (UI only)
+-- =========================================================================
+local function applyEffect(id)
+    PROFILE.Effect=id
+    if id=="Effect_01" then if Layers.effectGlow then Layers.effectGlow.Visible=false end
+    elseif id=="Effect_02" then if Layers.effectGlow then Layers.effectGlow.Visible=true; Layers.effectGlow.BackgroundTransparency=0.85 end
+    elseif id=="Effect_04" then -- scanlines 4 thin frames
+        -- create once
+    end
+end
+
+-- =========================================================================
+-- TEXT / RESPONSE / PRESENTATION  + Unified Message Queue
+-- =========================================================================
+local Responses = {
+    Greeting={"Hey.", "Oh, hey.", "You're back.", "What's up?", "Good to see you."},
+    Confused={"Wait, what?", "I'm not following.", "Can you explain that?", "Okay, you lost me."},
+    Happy={"Nice.", "I like that.", "That's actually pretty good.", "Okay, I approve."},
+    Unknown={"I'm not sure what you mean.", "Hm. I'm missing something.", "Can you rephrase that?"},
+    Farewell={"See you.", "Later.", "Take care.", "I'll be here."},
+}
+
+local conversationState = { LastMessage=nil, LastResponse=nil, LastTopic=nil, MessageCount=0, ConversationActive=false, lastMeaningful=0 }
+local RecentResponses = {}
+local MessageQueue = {}
+local isShowing=false
+
+local function pickResponse(poolName)
+    local pool=Responses[poolName] or Responses.Unknown
+    -- weighted simple random, avoid recent
+    local tries=0; local pick
+    repeat pick=pool[math.random(1,#pool)]; tries+=1 until not table.find(RecentResponses,pick) or tries>5
+    table.insert(RecentResponses, pick) if #RecentResponses>6 then table.remove(RecentResponses,1) end
+    return pick
+end
+
+local function inferIntent(text)
+    text=text:lower()
+    if text:match("^hey") or text:match("^hi") then return "Greeting" end
+    if text:match("bye") or text:match("later") then return "Farewell" end
+    if text:match("%?") then return "Question" end
+    if text:match("change") or text:match("equip") then return "Command" end
+    return "Statement"
+end
+
+local function autoPresentation(msg)
+    local n=#msg.Text
+    if msg.Priority>=3 then return "Popup" end
+    if msg.Type=="Reaction" then return "SpeechBubble" end
+    if n<=35 then return "SpeechBubble" end
+    if n<=120 then return "Speech" end
+    if n<=250 then return "Expanded" end
+    return "Popup"
+end
+
+-- typing + speech sync
+local speechLabel, bubbleFrame, bubbleLabel, notificationContainer
+local typingConn
+local function stopTyping() if typingConn then typingConn:Disconnect() typingConn=nil end Verity.StopTalking() end
+
+local function showTyping(msg, onDone)
+    local presentation = msg.Presentation or autoPresentation(msg)
+    local targetLabel = (presentation=="SpeechBubble" and bubbleLabel) or speechLabel
+    local targetFrame = (presentation=="SpeechBubble" and bubbleFrame) or nil
+    if targetFrame then targetFrame.Visible=true end
+    targetLabel.Text=""
+    targetLabel.Visible=true
+    Verity.StartTalking()
+    local i=0; local t=msg.Text
+    typingConn = RunService.Heartbeat:Connect(function()
+        i+=1
+        if i> #t then stopTyping(); if targetFrame then task.delay(msg.Duration or 2.5, function() targetFrame.Visible=false end) end Verity.StopTalking(); if onDone then onDone() end typingConn:Disconnect(); typingConn=nil; return end
+        targetLabel.Text = string.sub(t,1,i)
+        -- punctuation pause
+        local ch=string.sub(t,i,i) if ch:match("[%.%!%?%,]") then task.wait(0.08) end
+        task.wait(0.03 + math.random()*0.02)
+    end)
+    -- click to skip
+    if targetLabel then targetLabel.InputBegan:Connect(function(inp) if inp.UserInputType==Enum.UserInputType.MouseButton1 then if typingConn then typingConn:Disconnect(); typingConn=nil end targetLabel.Text=t; Verity.StopTalking(); if onDone then onDone() end end end) end
+end
+
+local function displayMessage(msg)
+    -- expression sync
+    if msg.Expression then Verity.SetExpression(msg.Expression, false) end
+    -- animation sync
+    if msg.Animation then Verity.SetAnimation(msg.Animation) end
+    -- presentation decide
+    if not msg.Presentation then msg.Presentation = autoPresentation(msg) end
+    -- duration default by length
+    if not msg.Duration then msg.Duration = math.clamp(#msg.Text*0.06, 1.5, 5) end
+    local pres=msg.Presentation
+    if pres=="Notification" then
+        -- compact corner
+        local n=Instance.new("Frame") n.Size=UDim2.fromOffset(220,44); n.Position=UDim2.new(1,-228,1,-52); n.BackgroundColor3=CONFIG.Slate; n.BorderSizePixel=0; n.Parent=notificationContainer; Instance.new("UICorner",{CornerRadius=UDim.new(0,8), Parent=n}); Instance.new("UIStroke",{Color=CONFIG.Gold, Thickness=1, Parent=n})
+        local tl=Instance.new("TextLabel") tl.Size=UDim2.new(1,-12,0,14); tl.Position=UDim2.new(0,8,0,6); tl.BackgroundTransparency=1; tl.Text="VERITY"; tl.TextSize=9; tl.TextColor3=CONFIG.Gold; tl.Font=Enum.Font.GothamBold; tl.TextXAlignment=Enum.TextXAlignment.Left; tl.Parent=n
+        local tx=Instance.new("TextLabel") tx.Size=UDim2.new(1,-12,0,16); tx.Position=UDim2.new(0,8,0,20); tx.BackgroundTransparency=1; tx.Text=msg.Text; tx.TextSize=11; tx.TextColor3=Color3.new(1,1,1); tx.Font=Enum.Font.Gotham; tx.TextXAlignment=Enum.TextXAlignment.Left; tx.Parent=n
+        task.delay(msg.Duration, function() n:Destroy() end)
+        task.delay(msg.Duration, function() processQueue() end)
+        return
+    end
+    if pres=="Status" then
+        speechLabel.Text=msg.Text; speechLabel.TextTransparency=0.2; task.delay(msg.Duration, function() processQueue() end) return
+    end
+    -- Speech / Bubble with typing
+    showTyping(msg, function() task.delay(0.3, function() processQueue() end) end)
+end
+
+function processQueue()
+    if isShowing then return end
+    if #MessageQueue==0 then return end
+    -- sort by priority desc, keep FIFO for same priority
+    table.sort(MessageQueue, function(a,b) return a.Priority > b.Priority end)
+    local msg=table.remove(MessageQueue,1)
+    isShowing=true
+    displayMessage(msg)
+    -- onDone will set isShowing false via delay
+    task.delay((msg.Duration or 2.5)+0.8, function() isShowing=false processQueue() end)
+end
+
+function Verity.Enqueue(msg)
+    -- msg = {Text, Type, Priority, Duration, Expression, Presentation, Animation, Action}
+    msg.Priority = msg.Priority or 1
+    msg.Type = msg.Type or "Response"
+    table.insert(MessageQueue, msg)
+    -- interruption: higher priority cancels low ambient
+    if msg.Priority>=3 and #MessageQueue>1 then
+        -- cancel ambient (0) that might be showing
+        if isShowing and MessageQueue[1] and MessageQueue[1].Priority==0 then table.remove(MessageQueue,1) end
+    end
+    processQueue()
+    -- action allowlist only
+    if msg.Action then
+        local allow={OpenWardrobe=true, SetExpression=true, EquipCosmetic=true}
+        if allow[msg.Action] then
+            if msg.Action=="OpenWardrobe" then Verity.OpenWardrobe(msg.ActionParam) end
+            if msg.Action=="SetExpression" then Verity.SetExpression(msg.ActionParam) end
+        end
+    end
+end
+
+function Verity.Say(text, opts)
+    opts=opts or {}
+    local intent=inferIntent(text)
+    -- farewell immediate ConversationActive false
+    if intent=="Farewell" then conversationState.ConversationActive=false end
+    -- wardrobe/system notifications do NOT reset timer
+    local isMeaningful = not (opts.isSystem or opts.isWardrobe)
+    if isMeaningful then
+        conversationState.ConversationActive=true
+        conversationState.lastMeaningful=tick()
+        conversationState.MessageCount+=1
+    end
+    conversationState.LastMessage=text
+    local msg={
+        Text=text, Type=opts.Type or "Response", Priority=opts.Priority or 1,
+        Duration=opts.Duration, Expression=opts.Expression or "Expression_01",
+        Presentation=opts.Presentation, Animation=opts.Animation or "Talking",
+        Action=opts.Action, ActionParam=opts.ActionParam
+    }
+    Verity.Enqueue(msg)
+end
+
+-- convenience wrappers used by hub
+function Verity.RespondToInput(userText)
+    local intent=inferIntent(userText)
+    local pool = (intent=="Greeting" and "Greeting") or (intent=="Farewell" and "Farewell") or "Unknown"
+    local txt=pickResponse(pool)
+    -- command → action
+    if userText:lower():match("change.*hair") then
+        Verity.Say("Sure.", {Type="Response", Presentation="SpeechBubble", Expression="Expression_06", Action="OpenWardrobe", ActionParam="Hair"})
+        return
+    end
+    if userText:lower():match("make.*happy") then
+        Verity.SetExpression("Expression_02"); Verity.Say("Easy.", {Expression="Expression_02"}) return
+    end
+    Verity.Say(txt, {Expression="Expression_01"})
+end
+
+-- idle dialogue 30-120s low prob, disabled while ConversationActive or recently spoke
+local lastIdle=tick()
+local function maybeIdle()
+    if conversationState.ConversationActive then return end
+    if tick()-lastIdle < 30 then return end
+    if math.random() > 0.12 then return end
+    local ambients={"Still here.","Thinking.","...","I wonder what you're doing."}
+    Verity.Say(ambients[math.random(1,#ambients)], {Type="Thought", Priority=0, Presentation="Thought", Expression="Expression_01", isSystem=true})
+    lastIdle=tick()
+end
+
+-- wardrobe UI
+local WardrobeModal
+function Verity.OpenWardrobe(cat)
+    if not WardrobeModal then Verity.CreateWardrobeUI() end
+    WardrobeModal.Visible=true
+    -- show cat tab
+end
+
+function Verity.CreateWardrobeUI()
+    local gui = LP:FindFirstChild("PlayerGui") or LP:WaitForChild("PlayerGui")
+    WardrobeModal = Instance.new("Frame")
+    WardrobeModal.Name="VerityWardrobeModal"; WardrobeModal.Size=UDim2.fromOffset(520,420); WardrobeModal.Position=UDim2.new(0.5,0,0.5,0); WardrobeModal.AnchorPoint=Vector2.new(0.5,0.5)
+    WardrobeModal.BackgroundColor3=CONFIG.Bg; WardrobeModal.BorderSizePixel=0; WardrobeModal.Visible=false; WardrobeModal.Parent=gui
+    Instance.new("UICorner",{CornerRadius=UDim.new(0,12), Parent=WardrobeModal})
+    Instance.new("UIStroke",{Color=CONFIG.Gold, Thickness=1.5, Parent=WardrobeModal})
+    local header=Instance.new("TextLabel") header.Size=UDim2.new(1,0,0,28); header.BackgroundTransparency=1; header.Text="←  VERITY WARDROBE"; header.TextSize=12; header.Font=Enum.Font.GothamBold; header.TextColor3=CONFIG.Gold; header.Parent=WardrobeModal
+    local left=Instance.new("ScrollingFrame") left.Size=UDim2.new(0,140,1,-36); left.Position=UDim2.new(0,8,0,32); left.BackgroundTransparency=1; left.ScrollBarThickness=4; left.CanvasSize=UDim2.new(0,0,0,400); left.Parent=WardrobeModal
+    Instance.new("UIListLayout",{Padding=UDim.new(0,6), Parent=left})
+    local right=Instance.new("Frame") right.Size=UDim2.new(1,-160,1,-36); right.Position=UDim2.new(0,156,0,32); right.BackgroundTransparency=1; right.Parent=WardrobeModal
+    -- preview orb in right top
+    local previewOrb=Instance.new("Frame") previewOrb.Size=UDim2.fromOffset(CONFIG.Orb,CONFIG.Orb); previewOrb.Position=UDim2.new(0.5,0,0,0); previewOrb.AnchorPoint=Vector2.new(0.5,0); previewOrb.BackgroundColor3=CONFIG.Slate; previewOrb.Parent=right Instance.new("UICorner",{CornerRadius=UDim.new(0,CONFIG.Orb/2), Parent=previewOrb})
+    -- clone verity canvas into orb for live preview
+    if VerityCanvas then local clone=VerityCanvas:Clone() clone.Size=UDim2.fromOffset(CONFIG.Size.X,CONFIG.Size.Y); clone.Position=UDim2.new(0.5,0,0.5,0); clone.AnchorPoint=Vector2.new(0.5,0.5); clone.Parent=previewOrb end
+    -- category tabs
+    local cats={"Hair","Eyes","Face","Clothing","Accessories","Held","Expressions","Effects"}
+    for _,cat in ipairs(cats) do
+        local b=Instance.new("TextButton") b.Size=UDim2.new(1,0,0,28); b.Text=cat; b.Font=Enum.Font.Gotham; b.TextSize=11; b.TextColor3=Color3.new(1,1,1); b.BackgroundColor3=CONFIG.Slate; b.Parent=left Instance.new("UICorner",{CornerRadius=UDim.new(0,6), Parent=b})
+        b.MouseButton1Click:Connect(function() Verity.ShowWardrobeCategory(cat, right) end)
+    end
+    -- close on click outside
+    WardrobeModal.InputBegan:Connect(function(i) if i.UserInputType==Enum.UserInputType.MouseButton1 and i.Position.Y < WardrobeModal.AbsolutePosition.Y then WardrobeModal.Visible=false end end)
+end
+
+function Verity.ShowWardrobeCategory(cat, container)
+    -- generate grid from WARDROBE data
+    -- clear previous grid
+    for _,c in ipairs(container:GetChildren()) do if c.Name=="Grid" then c:Destroy() end end
+    local dbKey = ({Hair="Hair", Eyes="Eyes", Face="Brows", Clothing="Tops", Accessories="HeadAcc", Held="Held", Expressions="EXPRESSIONS", Effects="Effects"})[cat] or cat
+    local src = (dbKey=="EXPRESSIONS" and EXPRESSIONS) or WARDROBE[dbKey] or {}
+    local grid=Instance.new("ScrollingFrame") grid.Name="Grid"; grid.Size=UDim2.new(1,0,0,200); grid.Position=UDim2.new(0,0,0,180); grid.BackgroundTransparency=1; grid.ScrollBarThickness=4; grid.CanvasSize=UDim2.new(0,0,0, math.ceil((function() local c=0 for _ in pairs(src) do c+=1 end return c end)()/2)*40); grid.Parent=container
+    Instance.new("UIGridLayout",{CellSize=UDim2.fromOffset(150,36), CellPadding=UDim2.fromOffset(6,6), Parent=grid})
+    for id,info in pairs(src) do
+        local btn=Instance.new("TextButton") btn.Size=UDim2.fromOffset(150,36); btn.Text=info.name or id; btn.TextSize=11; btn.Font=Enum.Font.Gotham; btn.BackgroundColor3=CONFIG.Slate; btn.TextColor3=Color3.new(1,1,1); btn.Parent=grid Instance.new("UICorner",{CornerRadius=UDim.new(0,6), Parent=btn})
+        if PROFILE[cat] and PROFILE[cat]==id then btn.BackgroundColor3=CONFIG.Gold end
+        btn.MouseButton1Click:Connect(function()
+            if dbKey=="EXPRESSIONS" then Verity.SetExpression(id); PROFILE.Expression=id else Verity.Equip(dbKey, id) end
+            -- chance response
+            if math.random()<0.22 then Verity.Say("Nice.", {Type="Reaction", Presentation="SpeechBubble", Priority=1, isWardrobe=true}) end
+        end)
+    end
+end
+
+-- =========================================================================
+-- PERSISTENCE — only IDs, global
+-- =========================================================================
+local CFG_FOLDER="equilibrium"
+function Verity.SaveProfile()
+    local data={} for k,v in pairs(PROFILE) do data[k]=v end
+    local ok,txt=pcall(game:GetService("HttpService").JSONEncode, game:GetService("HttpService"), data)
+    if ok then pcall(function() if not isfolder(CFG_FOLDER) then makefolder(CFG_FOLDER) end writefile(CFG_FOLDER.."/verity_profile.json", txt) end) end
+end
+function Verity.LoadProfile()
+    local ok,txt=pcall(readfile, CFG_FOLDER.."/verity_profile.json")
+    if ok then local ok2,data=pcall(game:GetService("HttpService").JSONDecode, game:GetService("HttpService"), txt) if ok2 and type(data)=="table" then for k,v in pairs(data) do if PROFILE[k]~=nil then PROFILE[k]=v end end end end
+end
+
+-- =========================================================================
+-- EVENTS — wardrobe:equip validated path
+-- =========================================================================
+-- handled in Verity.Equip above via _G.Equilibrium.EVENTS if present; also local
+
+-- =========================================================================
+-- INIT — VerityMenu:Init() entry
+-- =========================================================================
+function Verity.Init(parentGui)
+    parentGui = parentGui or LP:FindFirstChild("PlayerGui") or LP:WaitForChild("PlayerGui")
+    -- root frame VerityMenu 360x640 gold border Slate
+    Gui = Instance.new("ScreenGui") Gui.Name="VerityMenu"; Gui.ResetOnSpawn=false; Gui.ZIndexBehavior=Enum.ZIndexBehavior.Sibling; Gui.Parent=parentGui
+    local root=Instance.new("Frame") root.Name="VerityRoot"; root.Size=UDim2.fromOffset(360,640); root.Position=UDim2.new(0,20,0.5,0); root.AnchorPoint=Vector2.new(0,0.5); root.BackgroundColor3=CONFIG.Bg; root.BorderSizePixel=0; root.Parent=Gui Instance.new("UICorner",{CornerRadius=UDim.new(0,16), Parent=root}) Instance.new("UIStroke",{Color=CONFIG.Gold, Thickness=1.5, Parent=root})
+    -- top bar VERITY ASSISTANT dotted
+    local top=Instance.new("Frame") top.Size=UDim2.new(1,0,0,52); top.BackgroundTransparency=1; top.Parent=root
+    local title=Instance.new("TextLabel") title.Size=UDim2.new(1,0,0,22); title.Position=UDim2.new(0,0,0,8); title.BackgroundTransparency=1; title.Text="V E R I T Y"; title.TextSize=22; title.Font=Enum.Font.Code; title.TextColor3=Color3.new(1,1,1); title.Parent=top
+    local sub=Instance.new("TextLabel") sub.Size=UDim2.new(1,0,0,14); sub.Position=UDim2.new(0,0,0,28); sub.BackgroundTransparency=1; sub.Text="A S S I S T A N T"; sub.TextSize=9; sub.Font=Enum.Font.Gotham; sub.TextColor3=CONFIG.Gold; sub.Parent=top
+    -- gear + lock buttons
+    local gear=Instance.new("TextButton") gear.Size=UDim2.fromOffset(28,28); gear.Position=UDim2.new(0,8,0,12); gear.Text="⚙"; gear.Font=Enum.Font.GothamBold; gear.TextSize=14; gear.BackgroundColor3=CONFIG.Slate; gear.TextColor3=CONFIG.Gold; gear.Parent=root Instance.new("UICorner",{CornerRadius=UDim.new(0,8), Parent=gear}) Instance.new("UIStroke",{Color=CONFIG.Gold, Thickness=1, Parent=gear})
+    local lockBtn=Instance.new("TextButton") lockBtn.Size=UDim2.fromOffset(28,28); lockBtn.Position=UDim2.new(1,-36,0,12); lockBtn.Text="🔒"; lockBtn.Font=Enum.Font.Gotham; lockBtn.TextSize=12; lockBtn.BackgroundColor3=CONFIG.Slate; lockBtn.TextColor3=CONFIG.Gold; lockBtn.Parent=root Instance.new("UICorner",{CornerRadius=UDim.new(0,8), Parent=lockBtn}) Instance.new("UIStroke",{Color=CONFIG.Gold, Thickness=1, Parent=lockBtn})
+    -- orb
+    OrbsFrame=Instance.new("Frame") OrbsFrame.Size=UDim2.fromOffset(CONFIG.Orb,CONFIG.Orb); OrbsFrame.Position=UDim2.new(0.5,0,0,88); OrbsFrame.AnchorPoint=Vector2.new(0.5,0); OrbsFrame.BackgroundColor3=CONFIG.Slate; OrbsFrame.Parent=root Instance.new("UICorner",{CornerRadius=UDim.new(0,CONFIG.Orb/2), Parent=OrbsFrame}) Instance.new("UIStroke",{Color=CONFIG.Gold, Thickness=1, Parent=OrbsFrame})
+    Verity.LoadProfile()
+    Verity.CreateCharacter(OrbsFrame)
+    Verity.ApplyProfile()
+    -- speech + bubble + status containers
+    local chatCard=Instance.new("Frame") chatCard.Size=UDim2.new(1,-24,0,220); chatCard.Position=UDim2.new(0,12,0,300); chatCard.BackgroundColor3=CONFIG.Slate; chatCard.Parent=root Instance.new("UICorner",{CornerRadius=UDim.new(0,12), Parent=chatCard}) Instance.new("UIStroke",{Color=CONFIG.Gold, Thickness=1, Parent=chatCard})
+    speechLabel=Instance.new("TextLabel") speechLabel.Size=UDim2.new(1,-24,0,120); speechLabel.Position=UDim2.new(0,12,0,12); speechLabel.BackgroundTransparency=1; speechLabel.Text="Hi, I'm Verity.\nAsk me anything."; speechLabel.TextWrapped=true; speechLabel.TextSize=13; speechLabel.Font=Enum.Font.Gotham; speechLabel.TextColor3=Color3.new(1,1,1); speechLabel.Parent=chatCard
+    -- bubble (hidden until needed) near head
+    bubbleFrame=Instance.new("Frame") bubbleFrame.Size=UDim2.fromOffset(140,36); bubbleFrame.Position=UDim2.new(0.5, 60, 0, 180); bubbleFrame.BackgroundColor3=CONFIG.Slate; bubbleFrame.Visible=false; bubbleFrame.Parent=root Instance.new("UICorner",{CornerRadius=UDim.new(0,10), Parent=bubbleFrame}) Instance.new("UIStroke",{Color=CONFIG.Gold, Thickness=1, Parent=bubbleFrame})
+    bubbleLabel=Instance.new("TextLabel") bubbleLabel.Size=UDim2.new(1,-12,1,0); bubbleLabel.Position=UDim2.new(0,6,0,0); bubbleLabel.BackgroundTransparency=1; bubbleLabel.Text=""; bubbleLabel.TextSize=11; bubbleLabel.Font=Enum.Font.Gotham; bubbleLabel.TextColor3=Color3.new(1,1,1); bubbleLabel.TextWrapped=true; bubbleLabel.Parent=bubbleFrame
+    -- input bar
+    local inputBar=Instance.new("Frame") inputBar.Size=UDim2.new(1,-24,0,44); inputBar.Position=UDim2.new(0,12,0,532); inputBar.BackgroundColor3=CONFIG.Bg; inputBar.Parent=root Instance.new("UICorner",{CornerRadius=UDim.new(0,22), Parent=inputBar}) Instance.new("UIStroke",{Color=CONFIG.Gold, Thickness=1, Parent=inputBar})
+    local inputBox=Instance.new("TextBox") inputBox.Size=UDim2.new(1,-64,1,0); inputBox.Position=UDim2.new(0,16,0,0); inputBox.BackgroundTransparency=1; inputBox.PlaceholderText="Message Verity…"; inputBox.Text=""; inputBox.TextSize=12; inputBox.Font=Enum.Font.Gotham; inputBox.TextColor3=Color3.new(1,1,1); inputBox.TextXAlignment=Enum.TextXAlignment.Left; inputBox.Parent=inputBar
+    local sendBtn=Instance.new("TextButton") sendBtn.Size=UDim2.fromOffset(36,36); sendBtn.Position=UDim2.new(1,-40,0.5,0); sendBtn.AnchorPoint=Vector2.new(0,0.5); sendBtn.Text="▶"; sendBtn.Font=Enum.Font.GothamBold; sendBtn.TextSize=14; sendBtn.BackgroundColor3=CONFIG.Gold; sendBtn.TextColor3=CONFIG.Bg; sendBtn.Parent=inputBar Instance.new("UICorner",{CornerRadius=UDim.new(0,18), Parent=sendBtn})
+    sendBtn.MouseButton1Click:Connect(function() local t=inputBox.Text if t~="" then Verity.RespondToInput(t); inputBox.Text="" end end)
+    inputBox.FocusLost:Connect(function(enter) if enter and inputBox.Text~="" then Verity.RespondToInput(inputBox.Text); inputBox.Text="" end end)
+    -- wardrobe button bottom
+    local wardBtn=Instance.new("TextButton") wardBtn.Size=UDim2.new(1,-24,0,52); wardBtn.Position=UDim2.new(0,12,1,-60); wardBtn.Text=""; wardBtn.BackgroundColor3=CONFIG.Slate; wardBtn.Parent=root Instance.new("UICorner",{CornerRadius=UDim.new(0,12), Parent=wardBtn}) Instance.new("UIStroke",{Color=CONFIG.Gold, Thickness=1, Parent=wardBtn})
+    local wardIcon=Instance.new("TextLabel") wardIcon.Size=UDim2.new(1,0,0,22); wardIcon.Position=UDim2.new(0,0,0,8); wardIcon.BackgroundTransparency=1; wardIcon.Text="👕"; wardIcon.TextSize=18; wardIcon.Parent=wardBtn
+    local wardTxt=Instance.new("TextLabel") wardTxt.Size=UDim2.new(1,0,0,14); wardTxt.Position=UDim2.new(0,0,0,30); wardTxt.BackgroundTransparency=1; wardTxt.Text="WARDROBE"; wardTxt.TextSize=10; wardTxt.Font=Enum.Font.Gotham; wardTxt.TextColor3=Color3.new(1,1,1); wardTxt.Parent=wardBtn
+    wardBtn.MouseButton1Click:Connect(function() Verity.OpenWardrobe() end)
+    -- notification container (shared with Hub if exists)
+    notificationContainer = Instance.new("Frame") notificationContainer.Name="VerityNotify"; notificationContainer.Size=UDim2.new(0,240,1,0); notificationContainer.Position=UDim2.new(1,-248,0,0); notificationContainer.BackgroundTransparency=1; notificationContainer.Parent=Gui
+    _G.EquilibriumNotify = function(txt) Verity.Say(txt, {Type="Notification", Priority=3, Presentation="Notification", Duration=2.2, isSystem=true}) end
+    -- heartbeat single loop
+    if heartbeatConn then heartbeatConn:Disconnect() end
+    heartbeatConn = RunService.Heartbeat:Connect(function(dt) UpdateAnimations(dt) end)
+    pickIdle()
+    animationTimers.BlinkNext = RandomRange(ANIMATION_TIMING.Blink.MinimumDelay, ANIMATION_TIMING.Blink.MaximumDelay)
+    -- ConversationActive timeout ticker + idle dialogue
+    task.spawn(function()
+        while Gui.Parent do
+            task.wait(1)
+            -- auto-reset ConversationActive
+            if conversationState.ConversationActive and tick() - conversationState.lastMeaningful >= CONFIG.ConversationActiveTimeout then
+                conversationState.ConversationActive=false
+            end
+            maybeIdle()
+        end
+    end)
+    -- initial greeting
+    Verity.Say("Hi, I'm Verity. Ask me anything.", {Type="Greeting", Priority=2, Presentation="Speech", Expression="Expression_02"})
+    -- expose
+    _G.Verity = Verity
+    _G.VERITY_PROFILE = PROFILE
+    return Gui
+end
+
+return Verity
