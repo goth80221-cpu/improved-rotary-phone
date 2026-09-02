@@ -2124,29 +2124,64 @@ do local card=makeCard("Deloader","Lifecycle","Hybrid X: click hide | hold 0.9s 
     verBtn.Activated:Connect(function() pcall(function() if Gui then Gui:Destroy() end if heartbeatConn then heartbeatConn:Disconnect() end end) pushToast("Verity unloaded","warn",1.2) end)
     local allBtn=new("TextButton",{BackgroundColor3=T.warn, Size=UDim2.new(1,0,0,28), Text="UNLOAD All", Font=FONTB, TextSize=12, TextColor3=Color3.new(1,1,1), AutoButtonColor=false, ZIndex=14, Parent=card}) corner(allBtn,8) allBtn.Activated:Connect(function() local fn=getgenv()[UNLOAD_KEY] if fn then pcall(fn) end end) 
 end
--- About tab (UI assets, credits, games, bugfixes)
+-- About tab (consolidated: identity, runtime, credits, games, contributions, diagnostics)
 do
-    local AboutData={Version="2.7.2", Build="2.7.2", SpecialThanks={"Fleece Utility","SchizHub v7","DarkHub","TokkuHub"}, FavoriteGames={{name="Ninja Legends", creator="Ninja Team"},{name="Phantom Forces", creator="Stylis"},{name="Arsenal"},{name="Jailbreak"},{name="BedWars"}}, Contributions={"Equilibrium team","Community testers"}, Inspiration={"SchizHub design","Fleece panel","Verity assistant"}}
-    local abCard=makeCard("About","Equilibrium — About","UI assets, credits, and build info")
-    new("TextLabel",{BackgroundTransparency=1, Size=UDim2.new(1,0,0,14), Font=FONTB, Text="Version "..AboutData.Version.." | RuntimeSignature Heartbeats="..tostring(runtimeSignature().HeartbeatsObserved or 3), TextSize=9, TextColor3=T.dim, TextXAlignment=Enum.TextXAlignment.Left, ZIndex=13, Parent=abCard})
-    -- rbxasset inserter with 6 presets + custom 070707
-    local assetTitle=new("TextLabel",{BackgroundTransparency=1, Size=UDim2.new(1,0,0,14), Font=FONTB, Text="Asset Inserter  rbxassetid://", TextSize=10, TextColor3=T.subtext, TextXAlignment=Enum.TextXAlignment.Left, ZIndex=13, Parent=abCard})
-    local previewImg=new("ImageLabel",{BackgroundColor3=T.bg, Size=UDim2.new(0,80,0,80), BorderSizePixel=0, Image="", ZIndex=13, Parent=abCard}) corner(previewImg,8) stroke(previewImg,T.border,1)
+    local AboutData={
+        Version="2.7.2",
+        Build="10K-RP",
+        SpecialThanks={"Verity team","Fleece Utility","SchizHub v7","Base_Rework","DarkHub","TokkuHub","Contributors"},
+        FavoriteGames={
+            {name="Ninja Legends", creator="Scriptbloxian Studios", placeId=3956818381, actionLabel="Open"},
+            {name="Phantom Forces", creator="StyLiS Studios", placeId=292439477, actionLabel="Open"},
+            {name="Arsenal", creator="ROLVe Community", placeId=286090429, actionLabel="Open"},
+            {name="Jailbreak", creator="Badimo", placeId=606849621, actionLabel="Open"},
+            {name="BedWars", creator="Easy.gg", placeId=8737899170, actionLabel="Open"},
+            {name="Adopt Me!", creator="DreamCraft", placeId=920587237, actionLabel="Open"},
+            {name="Universal", description="Teleport / teleport-tested reference", placeId=nil, actionLabel=nil},
+        },
+        Contributions={"Asset inserter","TP Bank","Appearance system","Heartbeat validation","Compact tabs","Sidebar"},
+        Inspiration={"Built from experimentation with utility hubs, modular UI, and lightweight runtime tooling."},
+    }
+    
+    local abCard=makeCard("About","Equilibrium — About","UI assets, credits, and build information")
+    
+    -- Helper to create compact info cards
+    local function makeInfoCard(parent, title, contentText, textSize)
+        textSize = textSize or 10
+        local titleLabel=new("TextLabel",{BackgroundTransparency=1, Size=UDim2.new(1,0,0,13), Font=FONTB, Text=title, TextSize=10, TextColor3=T.text, TextXAlignment=Enum.TextXAlignment.Left, ZIndex=13, Parent=parent})
+        local contentLabel=new("TextLabel",{BackgroundTransparency=1, Size=UDim2.new(1,0,0,0), AutomaticSize=Enum.AutomaticSize.Y, Font=FONT, Text=contentText, TextSize=textSize, TextColor3=T.dim, TextWrapped=true, ZIndex=13, Parent=parent})
+        return titleLabel, contentLabel
+    end
+    
+    -- Identity card
+    local sig=runtimeSignature()
+    local identityText=string.format("Version %s | Build %s | RuntimeSignature Heartbeats=%d", 
+        AboutData.Version, AboutData.Build, sig.HeartbeatsObserved or 3)
+    makeInfoCard(abCard, "Identity", identityText, 9)
+    
+    -- Asset Inserter (kept as functional section above/below About content)
+    local assetSeparator=new("Frame",{BackgroundColor3=T.border, BackgroundTransparency=0.5, Size=UDim2.new(1,0,0,1), ZIndex=12, Parent=abCard})
+    local assetTitle=new("TextLabel",{BackgroundTransparency=1, Size=UDim2.new(1,0,0,13), Font=FONTB, Text="Asset Inserter  rbxassetid://", TextSize=10, TextColor3=T.subtext, TextXAlignment=Enum.TextXAlignment.Left, ZIndex=13, Parent=abCard})
+    local previewRow=new("Frame",{BackgroundTransparency=1, Size=UDim2.new(1,0,0,32), ZIndex=13, Parent=abCard}) 
+    hlist(previewRow,8)
+    local previewImg=new("ImageLabel",{BackgroundColor3=T.bg, Size=UDim2.new(0,80,0,80), BorderSizePixel=0, Image="", ZIndex=13, Parent=previewRow}) corner(previewImg,8) stroke(previewImg,T.border,1)
+    local previewInfo=new("Frame",{BackgroundTransparency=1, Size=UDim2.new(1,0,0,80), ZIndex=13, Parent=previewRow})
+    
     local AssetPresetRegistry={
         {Name="Preset 1", Id="6031090997"}, {Name="Preset 2", Id="6031091000"}, {Name="Preset 3", Id="6031091002"},
         {Name="Preset 4", Id="6034427301"}, {Name="Preset 5", Id="6031090998"}, {Name="Preset 6", Id="70707070"},
     }
     local AssetInsertionState="Ready"
     local lastInsertionRecord=nil
-    local stateLabel=new("TextLabel",{BackgroundTransparency=1, Size=UDim2.new(1,0,0,12), Font=FONT, Text="State: Ready", TextSize=9, TextColor3=T.dim, TextXAlignment=Enum.TextXAlignment.Left, ZIndex=13, Parent=abCard})
+    local stateLabel=new("TextLabel",{BackgroundTransparency=1, Size=UDim2.new(1,0,0,12), Font=FONT, Text="State: Ready", TextSize=9, TextColor3=T.dim, TextXAlignment=Enum.TextXAlignment.Left, ZIndex=13, Parent=previewInfo})
     local function setInsertionState(s) AssetInsertionState=s stateLabel.Text="State: "..s end
     _G.AssetPresetRegistry=AssetPresetRegistry
     _G.AssetInsertionState=function() return AssetInsertionState end
     _G.LastInsertionRecord=function() return lastInsertionRecord end
-    local presetRow=new("Frame",{BackgroundTransparency=1, Size=UDim2.new(1,0,0,28), ZIndex=13, Parent=abCard}) hlist(presetRow,4)
+    
+    local presetRow=new("Frame",{BackgroundTransparency=1, Size=UDim2.new(1,0,0,28), ZIndex=13, Parent=previewInfo}) hlist(presetRow,4)
     for i, preset in ipairs(AssetPresetRegistry) do
         local pid=preset.Id
-        -- validation: full numeric 6-10 digits
         local valid = pid:match("^%d+$") and #pid>=6 and #pid<=10
         local b=new("TextButton",{BackgroundColor3=T.panel, Size=UDim2.fromOffset(46,28), Text="P"..i, Font=FONT, TextSize=10, TextColor3=valid and T.dim or T.warn, AutoButtonColor=false, ZIndex=14, Parent=presetRow}) corner(b,6) stroke(b,T.border,1)
         b.Activated:Connect(function()
@@ -2165,7 +2200,8 @@ do
             end
         end)
     end
-    local customRow=new("Frame",{BackgroundTransparency=1, Size=UDim2.new(1,0,0,28), ZIndex=13, Parent=abCard}) hlist(customRow,6)
+    
+    local customRow=new("Frame",{BackgroundTransparency=1, Size=UDim2.new(1,0,0,28), ZIndex=13, Parent=previewInfo}) hlist(customRow,6)
     local idBox=new("TextBox",{BackgroundColor3=T.bg, Size=UDim2.new(0,120,0,28), Font=FONT, Text="", PlaceholderText="070707", PlaceholderColor3=T.dim, TextSize=11, TextColor3=T.text, ClearTextOnFocus=false, ZIndex=14, Parent=customRow}) corner(idBox,6) stroke(idBox,T.border,1) pad(idBox,0,0,8,8)
     local insertBtn=new("TextButton",{BackgroundColor3=T.accent, Size=UDim2.new(0,80,0,28), Text="Insert ID", Font=FONTB, TextSize=11, TextColor3=T.text, AutoButtonColor=false, ZIndex=14, Parent=customRow}) corner(insertBtn,6)
     insertBtn.Activated:Connect(function()
@@ -2175,7 +2211,6 @@ do
         setInsertionState("Inserting")
         local ok, err = pcall(function() previewImg.Image="rbxassetid://"..id end)
         local target = previewImg:GetFullName()
-        -- distinguish environment unavailable vs pcall failed vs success
         if not pcall(function() return game:GetService("InsertService") end) then
             lastInsertionRecord={Preset="Custom", AssetId=id, PreviewTarget=target, Target=target, InsertParent="Unavailable", State="Unavailable", InsertedAt=os.clock()}
             setInsertionState("Unavailable")
@@ -2192,16 +2227,55 @@ do
             pushToast("Failed: "..tostring(err),"warn",1)
         end
     end)
-    new("TextLabel",{BackgroundTransparency=1, Size=UDim2.new(1,0,0,12), Font=FONT, Text="6 presets + custom 070707 — txt doc implementation later", TextSize=9, TextColor3=T.dim, TextXAlignment=Enum.TextXAlignment.Left, ZIndex=13, Parent=abCard})
-    -- Credits
-    new("TextLabel",{BackgroundTransparency=1, Size=UDim2.new(1,0,0,14), Font=FONTB, Text="Credits", TextSize=11, TextColor3=T.text, ZIndex=13, Parent=abCard})
-    new("TextLabel",{BackgroundTransparency=1, Size=UDim2.new(1,0,0,0), AutomaticSize=Enum.AutomaticSize.Y, Font=FONT, Text="Equilibrium by Verity team | Based on Fleece Utility, SchizHub v7 (Base_Rework), DarkHub, TokkuHub | Special thanks contributors", TextSize=10, TextColor3=T.dim, TextWrapped=true, ZIndex=13, Parent=abCard})
-    -- Games tested/supported
-    new("TextLabel",{BackgroundTransparency=1, Size=UDim2.new(1,0,0,14), Font=FONTB, Text="Games Tested / Supported", TextSize=11, TextColor3=T.text, ZIndex=13, Parent=abCard})
-    new("TextLabel",{BackgroundTransparency=1, Size=UDim2.new(1,0,0,0), AutomaticSize=Enum.AutomaticSize.Y, Font=FONT, Text="Ninja Legends, Phantom Forces, Arsenal, Jailbreak, BedWars, Adopt Me, Universal — teleport/teleport tested, movement/visuals universal", TextSize=10, TextColor3=T.dim, TextWrapped=true, ZIndex=13, Parent=abCard})
-    -- Bug fix for build
-    new("TextLabel",{BackgroundTransparency=1, Size=UDim2.new(1,0,0,14), Font=FONTB, Text="Build Fixes — 10K-R", TextSize=11, TextColor3=T.text, ZIndex=13, Parent=abCard})
-    new("TextLabel",{BackgroundTransparency=1, Size=UDim2.new(1,0,0,0), AutomaticSize=Enum.AutomaticSize.Y, Font=FONT, Text="• TipFrame outside AutomaticSize hierarchy • Hover presentation-only • Enabled/Value isolation • Clip check toggle • Window _, Square, x preserved • REGISTER-01 temp globals", TextSize=9, TextColor3=T.dim, TextWrapped=true, ZIndex=13, Parent=abCard})
+    new("TextLabel",{BackgroundTransparency=1, Size=UDim2.new(1,0,0,11), Font=FONT, Text="6 presets + custom — preview only", TextSize=9, TextColor3=T.dim, TextXAlignment=Enum.TextXAlignment.Left, ZIndex=13, Parent=previewInfo})
+    
+    -- Separator
+    local sep2=new("Frame",{BackgroundColor3=T.border, BackgroundTransparency=0.5, Size=UDim2.new(1,0,0,1), ZIndex=12, Parent=abCard})
+    
+    -- Special Thanks card
+    makeInfoCard(abCard, "Special Thanks", table.concat(AboutData.SpecialThanks, " • "), 10)
+    
+    -- Favorite Games card with interactive rows
+    local gamesTitle=new("TextLabel",{BackgroundTransparency=1, Size=UDim2.new(1,0,0,13), Font=FONTB, Text="Favorite Games", TextSize=10, TextColor3=T.text, TextXAlignment=Enum.TextXAlignment.Left, ZIndex=13, Parent=abCard})
+    local gamesContainer=new("Frame",{BackgroundTransparency=1, Size=UDim2.new(1,0,0,0), AutomaticSize=Enum.AutomaticSize.Y, ZIndex=13, Parent=abCard})
+    vlist(gamesContainer,4)
+    
+    local function getGameAction(gameInfo)
+        if not gameInfo.placeId then return "Unavailable" end
+        return gameInfo.actionLabel or "Open"
+    end
+    
+    for _, gameInfo in ipairs(AboutData.FavoriteGames) do
+        local row=new("Frame",{BackgroundColor3=T.panel, BackgroundTransparency=0.3, Size=UDim2.new(1,0,0,42), ZIndex=13, Parent=gamesContainer}) corner(row,8) stroke(row,T.border,1)
+        hlist(row,8)
+        
+        local nameLabel=new("TextLabel",{BackgroundTransparency=1, Size=UDim2.new(0.6,0,0,20), Font=FONTB, Text=gameInfo.name, TextSize=11, TextColor3=T.text, TextXAlignment=Enum.TextXAlignment.Left, ZIndex=14, Parent=row})
+        local descLabel=new("TextLabel",{BackgroundTransparency=1, Size=UDim2.new(0.6,0,0,14), Position=UDim2.new(0,0,0,20), Font=FONT, Text=gameInfo.creator or gameInfo.description or "", TextSize=9, TextColor3=T.dim, TextXAlignment=Enum.TextXAlignment.Left, ZIndex=14, Parent=row})
+        
+        local action = getGameAction(gameInfo)
+        if action == "Open" then
+            local actionBtn=new("TextButton",{BackgroundColor3=T.accent, Size=UDim2.new(0,70,0,28), Text="Open", Font=FONTB, TextSize=10, TextColor3=T.text, AutoButtonColor=false, ZIndex=14, Parent=row}) corner(actionBtn,6)
+            actionBtn.Activated:Connect(function()
+                if gameInfo.placeId then
+                    pushToast("Opening "..gameInfo.name.."...","warn",1)
+                    -- Teleport would be implemented here with proper ServerHop controller
+                    pcall(function() game:GetService("TeleportService"):Teleport(gameInfo.placeId) end)
+                end
+            end)
+        else
+            local statusLabel=new("TextLabel",{BackgroundColor3=T.bg, Size=UDim2.new(0,80,0,28), Text="[Reference only]", Font=FONT, TextSize=9, TextColor3=T.dim, ZIndex=14, Parent=row}) corner(statusLabel,6)
+        end
+    end
+    
+    -- Contributions card
+    makeInfoCard(abCard, "Contributions", table.concat(AboutData.Contributions, " • "), 10)
+    
+    -- Inspiration card
+    makeInfoCard(abCard, "Inspiration", AboutData.Inspiration[1], 9)
+    
+    -- Diagnostics / Build Info card
+    local diagText=string.format("Build %s | Qualification: 10K-RP | Register pressure monitored", AboutData.Build)
+    makeInfoCard(abCard, "Diagnostics", diagText, 9)
 end
 
 -- Hotkeys
