@@ -1414,7 +1414,29 @@ register({id="teleport", name="Teleport to Player", category="Teleport", desc="C
 -- Tabs
 local TABS={"Movement","Visuals","Teleport","Server","Settings","Deloader","About"}; local currentTab=TABS[1]; local tabButtons={}; local cards={}
 local function refresh() for _,c in ipairs(cards) do c.frame.Visible=(currentTab==c.tab) end end
-for _,name in ipairs(TABS) do local b=new("TextButton",{BackgroundTransparency=1, Size=UDim2.new(1,0,0,36), Text="", AutoButtonColor=false, ZIndex=12, Parent=tabBar}) local lbl=new("TextLabel",{BackgroundTransparency=1, Size=UDim2.fromScale(1,1), Font=FONT, Text=name, TextSize=12, TextColor3=T.dim, ZIndex=13, Parent=b}) b.Activated:Connect(function() currentTab=name for _,bb in pairs(tabButtons) do bb.lbl.TextColor3=T.dim end lbl.TextColor3=T.text refresh() end) tabButtons[name]={btn=b,lbl=lbl} if name==currentTab then lbl.TextColor3=T.text end end
+for _,name in ipairs(TABS) do 
+    local b=new("TextButton",{BackgroundTransparency=1, Size=UDim2.new(1,0,0,36), Text="", AutoButtonColor=false, ZIndex=12, Parent=tabBar}) 
+    corner(b,8)
+    local lbl=new("TextLabel",{BackgroundTransparency=1, Size=UDim2.fromScale(1,1), Font=FONT, Text=name, TextSize=12, TextColor3=T.dim, ZIndex=13, Parent=b}) 
+    b.Activated:Connect(function() 
+        currentTab=name 
+        for _,bb in pairs(tabButtons) do 
+            bb.lbl.TextColor3=T.dim 
+            bb.btn.BackgroundTransparency=1
+            bb.btn.BackgroundColor3=T.bg
+        end 
+        lbl.TextColor3=T.text 
+        b.BackgroundTransparency=0
+        b.BackgroundColor3=T.panel
+        refresh() 
+    end) 
+    tabButtons[name]={btn=b,lbl=lbl} 
+    if name==currentTab then 
+        lbl.TextColor3=T.text 
+        b.BackgroundTransparency=0
+        b.BackgroundColor3=T.panel
+    end 
+end
 local function makeCard(tab,title,desc) local card=new("Frame",{BackgroundColor3=T.panel, Size=UDim2.new(1,0,0,0), AutomaticSize=Enum.AutomaticSize.Y, BorderSizePixel=0, Visible=tab==currentTab, ZIndex=12, Parent=page}) corner(card,10) stroke(card,T.border) pad(card,10,10,12,12) vlist(card,8) new("TextLabel",{BackgroundTransparency=1, Size=UDim2.new(1,0,0,16), Font=FONTB, Text=title, TextSize=13, TextColor3=T.text, TextXAlignment=Enum.TextXAlignment.Left, TextTruncate=Enum.TextTruncate.AtEnd, ZIndex=13, Parent=card}) if desc then new("TextLabel",{BackgroundTransparency=1, Size=UDim2.new(1,0,0,0), AutomaticSize=Enum.AutomaticSize.Y, Font=FONT, Text=desc, TextSize=10, TextColor3=T.dim, TextXAlignment=Enum.TextXAlignment.Left, TextWrapped=true, ZIndex=13, Parent=card}) end local c={frame=card,tab=tab} table.insert(cards,c) return card end
 local catMap={Movement={}, Visuals={}, Teleport={}, Server={}, Settings={}} for _,id in ipairs(order) do local f=Features[id] table.insert(catMap[f.category] or catMap["Settings"], f) end
 for _,cat in ipairs(TABS) do for _,def in ipairs(catMap[cat] or {}) do
@@ -1607,6 +1629,84 @@ do
             pushToast("Imported "..#data.." positions","warn",1)
             pcall(refreshTree)
         else pushToast("Invalid JSON","warn",1) end
+    end)
+    
+    -- Current coordinates display + Save button
+    local coordsRow = new("Frame",{BackgroundTransparency=1, Size=UDim2.new(1,0,0,28), ZIndex=13, Parent=tpCard}) hlist(coordsRow,6)
+    local coordsDisplay = new("TextBox",{BackgroundColor3=T.bg, Size=UDim2.new(1,-80,0,28), Font=FONT, Text="", PlaceholderText="Current coordinates", PlaceholderColor3=T.dim, TextSize=10, TextColor3=T.subtext, ClearTextOnFocus=false, ZIndex=14, Parent=coordsRow}) corner(coordsDisplay,8) stroke(coordsDisplay,T.border,1) pad(coordsDisplay,0,0,8,8)
+    local savePosBtn = new("TextButton",{BackgroundColor3=T.accent, Size=UDim2.new(0,76,0,28), Text="Save position", Font=FONTB, TextSize=10, TextColor3=T.text, AutoButtonColor=false, ZIndex=14, Parent=coordsRow}) corner(savePosBtn,8)
+    
+    -- Update coordinates display periodically
+    local function updateCoordsDisplay()
+        if alive() and Char.root then
+            local pos = Char.root.Position
+            coordsDisplay.Text = string.format("X %.2f  Y %.2f  Z %.2f", pos.X, pos.Y, pos.Z)
+        end
+    end
+    
+    -- Initial update and heartbeat
+    updateCoordsDisplay()
+    local coordsConn = RunService.Heartbeat:Connect(function()
+        if tpCard.Visible and alive() then updateCoordsDisplay() end
+    end)
+    rootMaid:give(coordsConn)
+    
+    savePosBtn.Activated:Connect(function()
+        if not alive() then pushToast("No character","warn") return end
+        local pg,box,saveBtn,cancelBtn,folderBox = ensurePrompt()
+        box.Text="" box.PlaceholderText="New checkpoint"
+        folderBox.Text="" folderBox.PlaceholderText="Leave empty for root"
+        pg.Visible=true box:CaptureFocus()
+        
+        if promptSaveConn then promptSaveConn:Disconnect() end
+        promptSaveConn = saveBtn.Activated:Connect(function()
+            local name = box.Text:gsub("^%s+",""):gsub("%s+$","")
+            if name=="" then name="Checkpoint_"..(#getBank().positions+1) end
+            
+            local cf = Char.root.CFrame
+            local d = serialize(cf)
+            local state = getBank()
+            
+            -- Determine folder from dropdown
+            local folderName = folderBox.Text:gsub("^%s+",""):gsub("%s+$","")
+            local folderId = nil
+            if folderName ~= "" then
+                -- Find or create folder
+                local foundFolder = nil
+                for _,f in ipairs(state.folders) do
+                    if f.name:lower() == folderName:lower() then
+                        foundFolder = f
+                        break
+                    end
+                end
+                if not foundFolder then
+                    table.insert(state.folders, {
+                        id = HttpService:GenerateGUID(false),
+                        name = folderName,
+                        parentId = nil,
+                        expanded = false,
+                        createdAt = os.time()
+                    })
+                    foundFolder = state.folders[#state.folders]
+                end
+                folderId = foundFolder.id
+            end
+            
+            table.insert(state.positions, {
+                id = HttpService:GenerateGUID(false),
+                name=name,
+                px=d.px, py=d.py, pz=d.pz,
+                lx=d.lx, ly=d.ly, lz=d.lz,
+                folderId=folderId,
+                createdAt=os.time(),
+                updatedAt=os.time()
+            })
+            saveBank(state)
+            pg.Visible=false
+            promptSaveConn:Disconnect()
+            pushToast("Saved "..name.." to "..(folderName or "root"),"warn",1.4)
+            pcall(refreshTree)
+        end)
     end)
     
     -- Tree container
@@ -2480,11 +2580,11 @@ do
         return titleLabel, subLabel
     end
     
-    -- Info card helper: creates a card with title and content
+    -- Info card helper: creates a card with title and content (centered headers, left-aligned content)
     local function makeInfoCard(parent, title, content, textSize)
         local card=new("Frame",{BackgroundColor3=T.panel, BackgroundTransparency=0.3, Size=UDim2.new(1,0,0,0), AutomaticSize=Enum.AutomaticSize.Y, ZIndex=13, Parent=parent}) corner(card,8) stroke(card,T.border,1) pad(card,10,10,10,10)
         local titleLabel=new("TextLabel",{BackgroundTransparency=1, Size=UDim2.new(1,0,0,13), Font=FONTB, Text=title, TextSize=11, TextColor3=T.text, TextXAlignment=Enum.TextXAlignment.Center, ZIndex=14, Parent=card})
-        local contentLabel=new("TextLabel",{BackgroundTransparency=1, Size=UDim2.new(1,0,0,0), AutomaticSize=Enum.AutomaticSize.Y, Font=FONT, Text=content, TextSize=textSize or 10, TextColor3=T.dim, TextXAlignment=Enum.TextXAlignment.Center, TextWrapped=true, ZIndex=14, Parent=card})
+        local contentLabel=new("TextLabel",{BackgroundTransparency=1, Size=UDim2.new(1,0,0,0), AutomaticSize=Enum.AutomaticSize.Y, Font=FONT, Text=content, TextSize=textSize or 10, TextColor3=T.dim, TextXAlignment=Enum.TextXAlignment.Left, TextWrapped=true, ZIndex=14, Parent=card})
         return card
     end
     
