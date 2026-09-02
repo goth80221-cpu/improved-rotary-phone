@@ -1,17 +1,31 @@
-- name: Roblox Luau Execution
-  # You may pin to the exact commit or the version.
-  # uses: grand-hawk/action-roblox-luau-execution@803a85ad3491e22ef540ff069b30fd8ef622606d
-  uses: grand-hawk/action-roblox-luau-execution@v1.0.1
-  with:
-    # Roblox Open Cloud API key (string)
-    roblox_api_key: 
-    # Universe id (string)
-    universe_id: 
-    # Place id (string)
-    place_id: 
-    # Luau file to execute (string path)
-    luau_file: 
-    # Output file to write to (string path)
-    output_file: # optional, default is 
-    # Dump output to summary as codeblock (boolean)
-    dump_to_summary: # optional
+name: Roblox Luau Execution
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+
+jobs:
+  run-luau:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Roblox Luau Execution
+        # You may pin to the exact commit or the version.
+        # uses: grand-hawk/action-roblox-luau-execution@803a85ad3491e22ef540ff069b30fd8ef622606d
+        uses: grand-hawk/action-roblox-luau-execution@v1.0.1
+        with:
+          # Roblox Open Cloud API key (string). Store this in repository secrets.
+          roblox_api_key: ${{ secrets.ROBLOX_API_KEY }}
+          # Universe id (string). Store this in repository secrets.
+          universe_id: ${{ secrets.UNIVERSE_ID }}
+          # Place id (string). Store this in repository secrets.
+          place_id: ${{ secrets.PLACE_ID }}
+          # Luau file to execute (string path in the repo)
+          luau_file: scripts/main.lua
+          # Output file to write to (string path). Optional; comment out if not used.
+          output_file: results/output.txt
+          # Dump output to summary as codeblock (boolean)
+          dump_to_summary: true
