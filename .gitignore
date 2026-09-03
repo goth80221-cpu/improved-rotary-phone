@@ -1,1 +1,1 @@
-Nothing should be ignored in this case, as only a single Lua source file was added without any build artifacts, dependencies, or temporary files.
+Nothing should be ignored based on the provided file changes. The modification of 'Equilibrium/Equilibrium.lua' is a source code file and does not require any additional ignore rules.

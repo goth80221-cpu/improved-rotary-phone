@@ -2625,36 +2625,36 @@ do
     
     local abCard=makeCard("About","Equilibrium — About","UI assets, credits, and build information")
     
-    -- Section helper: centered header, left-aligned content with proper spacing
+    -- Section helper: left-aligned header with proper spacing
     local function makeSection(parent, title, subtitle)
-        new("Frame",{BackgroundTransparency=1, Size=UDim2.new(1,0,0,8), ZIndex=13, Parent=parent})
-        local titleLabel=new("TextLabel",{BackgroundTransparency=1, Size=UDim2.new(1,0,0,16), Font=FONTB, Text=title, TextSize=12, TextColor3=T.text, TextXAlignment=Enum.TextXAlignment.Center, ZIndex=13, Parent=parent})
+        new("Frame",{BackgroundTransparency=1, Size=UDim2.new(1,0,0,6), ZIndex=13, Parent=parent})
+        local titleLabel=new("TextLabel",{BackgroundTransparency=1, Size=UDim2.new(1,0,0,14), Font=FONTB, Text=title, TextSize=11, TextColor3=T.text, TextXAlignment=Enum.TextXAlignment.Left, ZIndex=13, Parent=parent})
         if subtitle then
-            new("TextLabel",{BackgroundTransparency=1, Size=UDim2.new(1,0,0,14), Font=FONT, Text=subtitle, TextSize=10, TextColor3=T.dim, TextXAlignment=Enum.TextXAlignment.Center, TextWrapped=true, ZIndex=13, Parent=parent})
+            new("TextLabel",{BackgroundTransparency=1, Size=UDim2.new(1,0,0,12), Font=FONT, Text=subtitle, TextSize=9, TextColor3=T.dim, TextXAlignment=Enum.TextXAlignment.Left, TextWrapped=true, ZIndex=13, Parent=parent})
         end
         return titleLabel
     end
     
-    -- Info card helper: creates a card with title and content (centered headers, left-aligned content)
+    -- Info card helper: creates a card with title and content (left-aligned headers and content)
     local function makeInfoCard(parent, title, content, textSize)
-        new("Frame",{BackgroundTransparency=1, Size=UDim2.new(1,0,0,8), ZIndex=13, Parent=parent})
-        local card=new("Frame",{BackgroundColor3=T.panel, BackgroundTransparency=0.3, Size=UDim2.new(1,0,0,0), AutomaticSize=Enum.AutomaticSize.Y, ZIndex=13, Parent=parent}) corner(card,8) stroke(card,T.border,1) pad(card,12,12,12,12)
-        local titleLabel=new("TextLabel",{BackgroundTransparency=1, Size=UDim2.new(1,0,0,14), Font=FONTB, Text=title, TextSize=11, TextColor3=T.text, TextXAlignment=Enum.TextXAlignment.Center, ZIndex=14, Parent=card})
-        local contentLabel=new("TextLabel",{BackgroundTransparency=1, Size=UDim2.new(1,0,0,0), AutomaticSize=Enum.AutomaticSize.Y, Font=FONT, Text=content, TextSize=textSize or 10, TextColor3=T.subtext, TextXAlignment=Enum.TextXAlignment.Left, TextWrapped=true, ZIndex=14, Parent=card})
+        new("Frame",{BackgroundTransparency=1, Size=UDim2.new(1,0,0,6), ZIndex=13, Parent=parent})
+        local card=new("Frame",{BackgroundColor3=T.panel, BackgroundTransparency=0.3, Size=UDim2.new(1,0,0,0), AutomaticSize=Enum.AutomaticSize.Y, ZIndex=13, Parent=parent}) corner(card,8) stroke(card,T.border,1) pad(card,10,10,10,10)
+        local titleLabel=new("TextLabel",{BackgroundTransparency=1, Size=UDim2.new(1,0,0,12), Font=FONTB, Text=title, TextSize=10, TextColor3=T.text, TextXAlignment=Enum.TextXAlignment.Left, ZIndex=14, Parent=card})
+        local contentLabel=new("TextLabel",{BackgroundTransparency=1, Size=UDim2.new(1,0,0,0), AutomaticSize=Enum.AutomaticSize.Y, Font=FONT, Text=content, TextSize=textSize or 9, TextColor3=T.subtext, TextXAlignment=Enum.TextXAlignment.Left, TextWrapped=true, ZIndex=14, Parent=card})
         return card
     end
     
     -- Identity section (card layout)
-    new("Frame",{BackgroundTransparency=1, Size=UDim2.new(1,0,0,12), ZIndex=13, Parent=abCard})
-    local identityCard=new("Frame",{BackgroundColor3=T.panel, BackgroundTransparency=0.5, Size=UDim2.new(1,0,0,0), AutomaticSize=Enum.AutomaticSize.Y, ZIndex=13, Parent=abCard}) corner(identityCard,10) stroke(identityCard,T.border,1) pad(identityCard,14,14,14,14)
-    local idLayout=new("UIListLayout",{SortOrder=Enum.SortOrder.LayoutOrder, Padding=UDim2.fromOffset(0,12), Parent=identityCard})
+    new("Frame",{BackgroundTransparency=1, Size=UDim2.new(1,0,0,8), ZIndex=13, Parent=abCard})
+    local identityCard=new("Frame",{BackgroundColor3=T.panel, BackgroundTransparency=0.5, Size=UDim2.new(1,0,0,0), AutomaticSize=Enum.AutomaticSize.Y, ZIndex=13, Parent=abCard}) corner(identityCard,8) stroke(identityCard,T.border,1) pad(identityCard,12,12,12,12)
+    local idLayout=new("UIListLayout",{SortOrder=Enum.SortOrder.LayoutOrder, Padding=UDim2.fromOffset(0,8), Parent=identityCard})
     makeSection(identityCard, "BUILD INFO", string.format("Version %s · Build %s", AboutData.Version, AboutData.Build))
     local sig=runtimeSignature()
-    new("TextLabel",{BackgroundTransparency=1, Size=UDim2.new(1,0,0,13), Font=FONT, Text="Runtime Signature: Heartbeats-"..(sig.HeartbeatsObserved or 3), TextSize=10, TextColor3=T.dim, TextXAlignment=Enum.TextXAlignment.Center, ZIndex=13, Parent=identityCard})
+    new("TextLabel",{BackgroundTransparency=1, Size=UDim2.new(1,0,0,11), Font=FONT, Text="Runtime Signature: Heartbeats-"..(sig.HeartbeatsObserved or 3), TextSize=9, TextColor3=T.dim, TextXAlignment=Enum.TextXAlignment.Left, ZIndex=13, Parent=identityCard})
     
     -- Asset Inserter (kept as functional section above/below About content)
     local assetSeparator=new("Frame",{BackgroundColor3=T.border, BackgroundTransparency=0.5, Size=UDim2.new(1,0,0,1), ZIndex=12, Parent=abCard})
-    local assetTitle=new("TextLabel",{BackgroundTransparency=1, Size=UDim2.new(1,0,0,13), Font=FONTB, Text="Asset Inserter  rbxassetid://", TextSize=10, TextColor3=T.subtext, TextXAlignment=Enum.TextXAlignment.Left, ZIndex=13, Parent=abCard})
+    local assetTitle=new("TextLabel",{BackgroundTransparency=1, Size=UDim2.new(1,0,0,12), Font=FONTB, Text="Asset Inserter  rbxassetid://", TextSize=10, TextColor3=T.subtext, TextXAlignment=Enum.TextXAlignment.Left, ZIndex=13, Parent=abCard})
     local previewRow=new("Frame",{BackgroundTransparency=1, Size=UDim2.new(1,0,0,32), ZIndex=13, Parent=abCard}) 
     hlist(previewRow,8)
     local previewImg=new("ImageLabel",{BackgroundColor3=T.bg, Size=UDim2.new(0,80,0,80), BorderSizePixel=0, Image="", ZIndex=13, Parent=previewRow}) corner(previewImg,8) stroke(previewImg,T.border,1)
@@ -2726,12 +2726,13 @@ do
     local sep2=new("Frame",{BackgroundColor3=T.border, BackgroundTransparency=0.5, Size=UDim2.new(1,0,0,1), ZIndex=12, Parent=abCard})
     
     -- Special Thanks card
-    makeInfoCard(abCard, "Special Thanks", table.concat(AboutData.SpecialThanks, " • "), 10)
+    makeInfoCard(abCard, "Special Thanks", table.concat(AboutData.SpecialThanks, " • "), 9)
     
     -- Favorite Games card with interactive rows
-    local gamesTitle=new("TextLabel",{BackgroundTransparency=1, Size=UDim2.new(1,0,0,13), Font=FONTB, Text="Favorite Games", TextSize=10, TextColor3=T.text, TextXAlignment=Enum.TextXAlignment.Left, ZIndex=13, Parent=abCard})
+    new("Frame",{BackgroundTransparency=1, Size=UDim2.new(1,0,0,6), ZIndex=13, Parent=abCard})
+    local gamesTitle=new("TextLabel",{BackgroundTransparency=1, Size=UDim2.new(1,0,0,12), Font=FONTB, Text="Favorite Games", TextSize=10, TextColor3=T.text, TextXAlignment=Enum.TextXAlignment.Left, ZIndex=13, Parent=abCard})
     local gamesContainer=new("Frame",{BackgroundTransparency=1, Size=UDim2.new(1,0,0,0), AutomaticSize=Enum.AutomaticSize.Y, ZIndex=13, Parent=abCard})
-    vlist(gamesContainer,4)
+    vlist(gamesContainer,6)
     
     local function getGameAction(gameInfo)
         if not gameInfo.placeId then return "Unavailable" end
@@ -2739,15 +2740,14 @@ do
     end
     
     for _, gameInfo in ipairs(AboutData.FavoriteGames) do
-        local row=new("Frame",{BackgroundColor3=T.panel, BackgroundTransparency=0.3, Size=UDim2.new(1,0,0,42), ZIndex=13, Parent=gamesContainer}) corner(row,8) stroke(row,T.border,1)
-        hlist(row,8)
+        local row=new("Frame",{BackgroundColor3=T.panel, BackgroundTransparency=0.3, Size=UDim2.new(1,0,0,48), ZIndex=13, Parent=gamesContainer}) corner(row,8) stroke(row,T.border,1)
         
-        local nameLabel=new("TextLabel",{BackgroundTransparency=1, Size=UDim2.new(0.6,0,0,20), Font=FONTB, Text=gameInfo.name, TextSize=11, TextColor3=T.text, TextXAlignment=Enum.TextXAlignment.Left, ZIndex=14, Parent=row})
-        local descLabel=new("TextLabel",{BackgroundTransparency=1, Size=UDim2.new(0.6,0,0,14), Position=UDim2.new(0,0,0,20), Font=FONT, Text=gameInfo.creator or gameInfo.description or "", TextSize=9, TextColor3=T.dim, TextXAlignment=Enum.TextXAlignment.Left, ZIndex=14, Parent=row})
+        local nameLabel=new("TextLabel",{BackgroundTransparency=1, Size=UDim2.new(0.55,0,0,20), Position=UDim2.new(0,8,0,8), Font=FONTB, Text=gameInfo.name, TextSize=11, TextColor3=T.text, TextXAlignment=Enum.TextXAlignment.Left, TextTruncate=Enum.TextTruncate.AtEnd, ZIndex=14, Parent=row})
+        local descLabel=new("TextLabel",{BackgroundTransparency=1, Size=UDim2.new(0.55,0,0,16), Position=UDim2.new(0,8,0,28), Font=FONT, Text=gameInfo.creator or gameInfo.description or "", TextSize=9, TextColor3=T.dim, TextXAlignment=Enum.TextXAlignment.Left, TextTruncate=Enum.TextTruncate.AtEnd, ZIndex=14, Parent=row})
         
         local action = getGameAction(gameInfo)
         if action == "Open" then
-            local actionBtn=new("TextButton",{BackgroundColor3=T.accent, Size=UDim2.new(0,70,0,28), Text="Open", Font=FONTB, TextSize=10, TextColor3=T.text, AutoButtonColor=false, ZIndex=14, Parent=row}) corner(actionBtn,6)
+            local actionBtn=new("TextButton",{BackgroundColor3=T.accent, Size=UDim2.new(0,64,0,26), Position=UDim2.new(1,-72,0,11), Text="Open", Font=FONTB, TextSize=10, TextColor3=T.text, AutoButtonColor=false, ZIndex=14, Parent=row}) corner(actionBtn,6)
             actionBtn.Activated:Connect(function()
                 if gameInfo.placeId then
                     pushToast("Opening "..gameInfo.name.."...","warn",1)
@@ -2756,12 +2756,12 @@ do
                 end
             end)
         else
-            local statusLabel=new("TextLabel",{BackgroundColor3=T.bg, Size=UDim2.new(0,80,0,28), Text="[Reference only]", Font=FONT, TextSize=9, TextColor3=T.dim, ZIndex=14, Parent=row}) corner(statusLabel,6)
+            local statusLabel=new("TextLabel",{BackgroundColor3=T.bg, Size=UDim2.new(0,72,0,26), Position=UDim2.new(1,-80,0,11), Text="[Reference]", Font=FONT, TextSize=9, TextColor3=T.dim, ZIndex=14, Parent=row}) corner(statusLabel,6)
         end
     end
     
     -- Contributions card
-    makeInfoCard(abCard, "Contributions", table.concat(AboutData.Contributions, " • "), 10)
+    makeInfoCard(abCard, "Contributions", table.concat(AboutData.Contributions, " • "), 9)
     
     -- Inspiration card
     makeInfoCard(abCard, "Inspiration", AboutData.Inspiration[1], 9)
